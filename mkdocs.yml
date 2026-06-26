@@ -1,5 +1,8 @@
 site_name: Stem Quest Academy — Operations Runbooks
 site_description: Operational runbooks for the SQA Open edX platform (plugin, MFEs, theming, deploy)
+# Must include the /sqa-runbooks/ subpath — GitHub project Pages serve under it, and without
+# this the CSS/JS and the 404 page resolve to the domain root and 404 (unstyled site).
+site_url: https://scient-systems.github.io/sqa-runbooks/
 
 # Point MkDocs at runbooks/ so it never touches the cookiecutter Sphinx docs/ dir.
 docs_dir: runbooks
@@ -40,7 +43,7 @@ markdown_extensions:
   - pymdownx.inlinehilite
 
 nav:
-  - Start Here: 00-START-HERE.md
+  - Start Here: index.md
   - 01 · Local dev environment setup: 01-local-dev-environment-setup.md
   - 02 · Tutor architecture explained: 02-tutor-architecture-explained.md
   - 03 · Running Open edX locally: 03-running-openedx-locally.md
