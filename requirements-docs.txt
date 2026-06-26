@@ -1,0 +1,2 @@
+# Docs site (MkDocs Material) — used by .github/workflows/docs.yml and `mkdocs serve` locally.
+mkdocs-material>=9.5,<10

@@ -1,0 +1,58 @@
+site_name: Stem Quest Academy — Operations Runbooks
+site_description: Operational runbooks for the SQA Open edX platform (plugin, MFEs, theming, deploy)
+
+# Point MkDocs at runbooks/ so it never touches the cookiecutter Sphinx docs/ dir.
+docs_dir: runbooks
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.tracking
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.inlinehilite
+
+nav:
+  - Start Here: 00-START-HERE.md
+  - 01 · Local dev environment setup: 01-local-dev-environment-setup.md
+  - 02 · Tutor architecture explained: 02-tutor-architecture-explained.md
+  - 03 · Running Open edX locally: 03-running-openedx-locally.md
+  - 04 · Admin & user management: 04-admin-and-user-management.md
+  - 05 · Creating & managing courses: 05-creating-and-managing-courses.md
+  - 06 · Installing a Django plugin app: 06-installing-a-django-plugin-app.md
+  - 07 · Writing Tutor plugins & patches: 07-writing-tutor-plugins-and-patches.md
+  - 08 · MFEs — editing & adding new: 08-mfes-editing-and-adding-new.md
+  - 09 · MFE plugin slots & React components: 09-mfe-plugin-slots-react-components.md
+  - 10 · Theming the LMS & MFEs: 10-theming-lms-and-mfes.md
+  - 11 · The Tutor Indigo plugin: 11-tutor-indigo-plugin.md
+  - 12 · Production deployment (k8s): 12-production-deployment-k8s.md
+  - 13 · Deploying companion services: 13-deploying-companion-services.md
+  - 14 · Stripe payments integration: 14-stripe-payments-integration.md
+  - 15 · Troubleshooting & gotchas: 15-troubleshooting-and-gotchas.md
