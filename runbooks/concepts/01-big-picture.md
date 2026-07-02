@@ -103,7 +103,6 @@ jsDelivr (serves our theme CSS), Vercel (gateway + homepage), Google Fonts.
 |---|---|---|---|
 | How to customize Open edX | A **plugin** inside the LMS | Fork edx-platform; separate microservice | Fork = merge hell on every upgrade. Microservice = can't hear LMS signals natively, needs its own auth/DB sync. Plugin = native power; trade-off: our bugs run *inside* the LMS, and deploys ride the big image (→ concepts/03) |
 | How to install/run Open edX | **Tutor** | Manual "native" install; the old devstack | Manual = weeks of pain, no upgrade path. Tutor is the official, supported way. Trade-off: you must learn Tutor's render-then-run model (→ concepts/06) |
-| Production runtime | **k8s on one VPS** (`tutor k8s`) | `tutor local` (docker-compose) on the VPS; managed k8s (EKS/GKE) | docker-compose would honestly be simpler on one machine; k8s gives us declarative config, secrets, and a growth path. Managed k8s costs 3–5× more. Trade-off we accepted: k8s complexity + an 8 GB node that can't run two LMS pods at once (→ war story #2) |
 | Where images live | **GHCR** (private) | Docker Hub; public images | Private keeps our plugin code out of public pull; trade-off: every puller (including the cluster itself!) needs credentials that can *expire* (→ concepts/09) |
 | Homepage | Standalone Next.js | Theme the LMS index page | Marketing iterates weekly; decoupling means homepage deploys never touch the LMS |
 

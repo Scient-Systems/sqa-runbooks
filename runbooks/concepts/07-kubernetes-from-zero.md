@@ -109,7 +109,7 @@ Status decoder: `Pending` = no room/can't schedule → describe, look for Failed
 then dies → `logs --previous`. `Running 0/1` = alive but failing its readiness probe →
 still booting, or sick → logs.
 
-## 7. Trade-off corner: was k8s even the right call?
+<!-- ## 7. Trade-off corner: was k8s even the right call?
 
 On a single VPS, `tutor local` (docker-compose) would be *simpler*: no registry pulls, no
 scheduling, no pull secrets, fewer moving parts. We chose k8s for: declarative
@@ -119,7 +119,7 @@ pods (lms could surge again), but our databases sit on **node-local PVCs** — t
 pinned to this machine until we move to networked storage or managed databases
 (→ concepts/13 §6). "Just add a node" is half true; the stateful half is a project.
 The costs we knowingly eat: the memory-vs-downtime rollout dilemma, registry auth
-lifecycle, and a steeper learning curve — this doc *is* that cost, paid forward.
+lifecycle, and a steeper learning curve — this doc *is* that cost, paid forward. -->
 
 ## You're ready when…
 
