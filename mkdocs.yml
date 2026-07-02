@@ -44,6 +44,22 @@ markdown_extensions:
 
 nav:
   - Start Here: index.md
+  - Concepts (read first):
+      - Overview & learning path: concepts/README.md
+      - C01 · The big picture: concepts/01-big-picture.md
+      - C02 · A request's journey: concepts/02-request-journey.md
+      - C03 · Django & the plugin idea: concepts/03-django-and-plugins.md
+      - C04 · Open edX anatomy: concepts/04-openedx-anatomy.md
+      - C05 · Containers, images, registries: concepts/05-containers-and-images.md
+      - C06 · The Tutor mental model: concepts/06-tutor-mental-model.md
+      - C07 · Kubernetes from zero: concepts/07-kubernetes-from-zero.md
+      - C08 · Theming concepts: concepts/08-theming-concepts.md
+      - C09 · Auth & secrets: concepts/09-auth-and-secrets.md
+      - C10 · Payments concepts: concepts/10-payments-concepts.md
+      - C11 · The debugging method: concepts/11-debugging-method.md
+      - C12 · War stories: concepts/12-war-stories.md
+      - C13 · State, data & backups: concepts/13-state-and-data.md
+      - C14 · Anatomy of a feature: concepts/14-anatomy-of-a-feature.md
   - 01 · Local dev environment setup: 01-local-dev-environment-setup.md
   - 02 · Tutor architecture explained: 02-tutor-architecture-explained.md
   - 03 · Running Open edX locally: 03-running-openedx-locally.md

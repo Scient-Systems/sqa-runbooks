@@ -10,6 +10,15 @@ so you never rediscover it. The deep "why" docs still live at the repo root
 (`LOCAL_DEV.md`, `PROD_DEPLOYMENT.md`, `MFE_COMPONENT_GUIDE.md`, `LMS_THEMING_GUIDE.md`,
 `SQA_PLUGIN_CONTEXT.md`) — the runbooks are the **operational** layer on top of them.
 
+> 🧠 **New here, or lost in the jargon?** There is now a **concept-first layer** under
+> [`concepts/`](concepts/README.md): 14 short docs that explain the platform from the big
+> picture down — Django & plugins, Open edX anatomy, Docker, Tutor, Kubernetes, theming,
+> auth/secrets, payments, data & backups, the debugging method, war stories of real
+> incidents with the alternatives and trade-offs we weighed, and the anatomy of how a
+> real feature was built end-to-end. **If a runbook ever feels like information
+> overload, the missing background lives there.** Runbooks = what to type; concepts = why
+> it works and what to do when it doesn't.
+
 ---
 
 ## 1. What is Open edX (the 30-second version)
@@ -144,9 +153,13 @@ in **runbook 06 §2** — read it once early; it's the conceptual spine.
 
 ## 6. Recommended reading order
 
+- **Day zero (don't know Docker/k8s/Django/Open edX yet?):** `concepts/` 01 → 02 first,
+  then the rest of `concepts/` as each topic becomes relevant. They're written to be read
+  *before* the runbook that uses them.
 - **First day:** 00 (this) → 01 (set up your machine) → 02 (understand Tutor) → 03 (run it).
 - **First task:** whichever of 04–14 matches the job (see §4 table).
-- **When stuck:** 15 (troubleshooting) — it's a symptom→fix index of every gotcha we hit.
+- **When stuck:** 15 (troubleshooting) — a symptom→fix index — plus `concepts/11`
+  (the debugging method) and `concepts/12` (war stories) for the *how to think* half.
 
 > Conventions in these runbooks: shell blocks are copy-paste-ready. `<ANGLE_BRACKETS>` mean
 > "replace this". 🚨 marks a footgun that has actually cost us hours. ✅ marks a verification
