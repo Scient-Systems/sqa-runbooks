@@ -17,19 +17,62 @@ you create the course; they're permanent.
 
 ## 2. Create a course in Studio (the visual way)
 
-1. Open Studio: `http://studio.local.openedx.io:8001` (local) — log in with a user that has Studio
-   access (superuser, or granted via **Course Team**).
-2. **New Course** → fill Org / Course Number / Course Run → Create.
-3. Build structure: **Sections** (chapters) → **Subsections** (sequentials) → **Units** (verticals)
-   → **Components** (HTML, Problem, Video, Discussion, Open Response Assessment…).
-4. **Settings → Schedule & Details**: set the Start date (a course with a future start is invisible
-   to students). **Settings → Grading**: define assignment types + pass cutoff. **Settings → Course
-   Team**: add authors.
-5. **Publish** units (the green Publish button) — unpublished edits are invisible to students.
+Studio is the course-building tool. It's all point-and-click — no files, no XML.
 
-## 3. The OLX file format (the scripted way)
+**Where to log in** (with an account that has Studio access — a superuser, or someone added to the
+course's **Course Team**):
 
-OLX is the on-disk representation of a course — what export produces and import consumes. Structure:
+- Production: `https://apps.lms.stemquestacademy.com/authoring/home`
+- Local dev: `http://studio.local.openedx.io:8001`
+
+**Step 1 — make the course.** Click **New Course**, fill in the four fields (Course Name,
+Organization, Course Number, Course Run), click **Create Course**. 🚨 The last three become the
+permanent course key (§1). You can rename the course later; you cannot change these.
+
+**Step 2 — build the structure.** Four levels, each one living inside the one above it:
+
+| Level | What it is |
+|---|---|
+| **Section** | A big chunk — e.g. "Week 1" |
+| **Subsection** | One lesson inside that week |
+| **Unit** | One page the student actually opens |
+| **Component** | The content on that page — text, video, quiz question, discussion |
+
+**Step 3 — set the course up.** Under **Settings**:
+
+- **Schedule & Details** → the **Start date**. 🚨 A course starting in the future is invisible to
+  students.
+- **Grading** → assignment types and the pass mark (§6).
+- **Course Team** → who else is allowed to edit.
+
+**Step 4 — publish.** Hit the green **Publish** button on each unit. 🚨 Unpublished work doesn't
+exist as far as students are concerned, even though you can see it fine.
+
+## 3. OLX — a course as a folder of files
+
+OLX is what a course looks like on disk: a folder full of XML files. Export writes it out, import
+reads it back in. Use it when you want to generate or bulk-edit a course instead of clicking
+through Studio.
+
+**What's in the folder**
+
+| Folder / file | What it holds |
+|---|---|
+| `course.xml` | The entry point — points at everything else |
+| `chapter/` | Sections |
+| `sequential/` | Subsections |
+| `vertical/` | Units (the pages) |
+| `html/` | Text lessons |
+| `video/` | Videos |
+| `problem/` | Quizzes and graded questions |
+| `lti/` | External learning tools plugged into the course |
+| `static/` | Images, PDFs and other assets |
+| `policies/` | Course settings and the grading rules |
+
+Note the naming: the folders use the *internal* names for the three structure levels — a Section is
+a `chapter`, a Subsection is a `sequential`, a Unit is a `vertical`.
+
+**The same thing, showing how the files point at each other:**
 
 ```
 course/                      ← the importable root
@@ -47,8 +90,11 @@ course/                      ← the importable root
 └── about/overview.html      ← marketing description
 ```
 
-Leaf component examples (validated against our Open edX version — see
-`silly_bot_course_project/SILLY_BOT_COURSE_BUILD_PLAN.md` §7 for the full set):
+**Examples of the actual content files** (validated against our Open edX version — see
+`silly_bot_course_project/SILLY_BOT_COURSE_BUILD_PLAN.md` §7 for the full set, and the demo course
+for worked examples of every question type: single-select, multi-select, dropdowns, formula and
+math-expression input, multi-part problems, Python-evaluated input, polls, surveys, Staff Graded
+Assignments and LTI):
 
 ```xml
 <!-- Multiple choice -->
@@ -77,27 +123,47 @@ def check_reply(expect, ans):
 </problem>
 ```
 
-Validate OLX before importing:
-```bash
-xmllint --noout course/**/*.xml      # every file must be well-formed
-```
-Also check **referential integrity**: every `url_name`/`filename` a parent references must resolve to
-a real file, and no orphan files. (The Silly Bot build enforced this as ACs G-a / G-b.)
+**Check the files before importing.** Two things:
+
+1. **Every file is valid XML:**
+
+    ```bash
+    xmllint --noout course/**/*.xml
+    ```
+
+2. **Every link resolves** — if a parent file points at a `url_name`, that file has to actually
+   exist, and there should be no leftover files that nothing points at. (The Silly Bot build
+   enforced this as ACs G-a / G-b.)
 
 ## 4. Import & export
 
-### Studio UI (primary, newbie-friendly)
-- **Export:** course → **Tools → Export** → downloads a `.tar.gz` of the OLX.
-- **Import:** course → **Tools → Import** → upload a `.tar.gz`. 🚨 Import **overwrites** the target
-  course — import into a throwaway/staging run first if the existing content matters.
+### Through Studio (the normal way)
 
-The tarball must have `course.xml` at the **top level** (`tar tzf course.tar.gz | head` should show
-`course/course.xml` near the root). Build one with:
+**To download a course:** open it → **Tools → Export** → you get a `.tar.gz` file of the OLX.
+
+**To upload a course:** open the course → **Tools → Import** → choose your `.tar.gz` → start the
+import. 🚨 Import **replaces everything** in that course. If the existing content matters, import
+into a throwaway course run first.
+
+**Making the `.tar.gz`.** Put the course folder somewhere, open a terminal there, and zip it up:
+
+```powershell
+# Windows (PowerShell)
+tar -czf course.tar.gz folder_name        # folder_name = the course folder
+```
 ```bash
-cd ~/silly_bot_course_project && tar czf silly_bot_course.tar.gz -C silly_bot_course .
+# Linux / Mac / WSL
+tar -czf course.tar.gz folder_name
 ```
 
-### Command line (for automation)
+🚨 `course.xml` has to sit at the top of the archive. Check before uploading — the first lines
+should show `folder_name/course.xml`, not something buried three folders deep:
+
+```bash
+tar tzf course.tar.gz | head
+```
+
+### From the command line (for automation)
 ```bash
 # dev:
 tutor dev exec cms ./manage.py cms import /openedx/data /openedx/data/<course-dir>
