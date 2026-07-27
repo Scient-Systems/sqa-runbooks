@@ -1,60 +1,188 @@
 # 05 — Creating & managing courses
 
-Two ways to build a course in Open edX: **Studio** (the visual authoring tool, best for most work)
-and **OLX** (the XML file format, best for bulk/scripted/AI-generated content). This runbook covers
-both, plus import/export and the platform features courses depend on.
+This runbook has **two halves**, for two different readers.
+
+| I want to… | Go to |
+|---|---|
+| Build and run a course myself, by clicking around | **Part 1** (§1–§7) — no coding, no terminal |
+| Upload a course somebody handed me as a file | **Part 1, §7** |
+| Generate a course from files, or script/automate it | **Part 2** (§8–§12) — developers |
+
+If you're a course creator or manager, **Part 1 is your whole job**. You can stop at §7 and never
+open Part 2.
+
+---
+
+# Part 1 — For course creators
+
+## 1. The words you'll meet
+
+Open edX has its own vocabulary. These are the ones you can't avoid:
+
+| Word | What it means |
+|---|---|
+| **Studio** | The tool where you build courses. Point-and-click, like a website builder |
+| **LMS** | The site your students see |
+| **Section** | A big chunk of the course — e.g. "Week 1" |
+| **Subsection** | One lesson inside a section |
+| **Unit** | One page the student opens |
+| **Component** | A piece of content on that page — text, video, a quiz question |
+| **Run** | One intake of a course. The same course taught in spring and autumn = two runs |
+| **Publish** | Making your work visible to students. Until you publish, only you can see it |
+
+## 2. Where to log in
+
+- **Live site:** `https://apps.lms.stemquestacademy.com/authoring/home`
+- **Local test setup:** `http://studio.local.openedx.io:8001`
+
+You need an account with Studio access — either an admin account, or you've been added to a
+course's **Course Team** (§5).
+
+## 3. Make a new course
+
+1. Click **New Course**.
+2. Fill in four boxes: **Course Name**, **Organization**, **Course Number**, **Course Run**.
+3. Click **Create Course**.
+
+🚨 **Get the last three right the first time.** Together they form the course's permanent ID, and
+they **cannot be changed afterwards**. You can freely rename the course title later; you cannot
+change the number or the run.
+
+Example: Organization `SQA`, Number `SQA405`, Run `2026_T2` gives the ID
+`course-v1:SQA+SQA405+2026_T2`. You'll see that string in links and in admin screens — it's just
+those three values glued together.
+
+**Naming tips:** use the run for the intake (`2026_T2`, `2026_Fall`), and keep the number stable
+across runs of the same course. Avoid spaces and punctuation in all three.
+
+## 4. Build the course
+
+Everything nests, four levels deep:
+
+```
+Section          "Week 1: Meet the chatbot"
+└── Subsection   "Lesson 1: What is a model?"
+    └── Unit     "Video: how it works"      ← one page for the student
+        └── Component   the video itself, plus a paragraph of text
+```
+
+**To add content:** open a Unit and use the **Add New Component** buttons at the bottom. The ones
+you'll actually use:
+
+| Component | Use it for |
+|---|---|
+| **Text** | Written lessons, instructions, images |
+| **Video** | A video lesson |
+| **Problem** | Quiz questions — multiple choice, dropdowns, text answers, and more |
+| **Discussion** | A comment thread on that page |
+
+**To reorder anything**, drag it by the handle on the left. Sections, subsections, units and
+components can all be moved this way.
+
+**To see it as a student would:** use **Preview** (shows unpublished work too) or **View Live**
+(shows exactly what students currently get). Get in the habit of checking View Live — it's how you
+catch things you forgot to publish.
+
+## 5. Set dates, grading and who can edit
+
+All under **Settings** in the top menu.
+
+### Schedule & Details
+
+Set the **Course Start Date**. 🚨 If the start date is in the future, students cannot see the
+course at all — this is the single most common "why is my course missing?" cause.
+
+Also here: end date, the course card image, and the short description shown in the catalog.
+
+### Grading
+
+This is where you decide how the final grade is worked out.
+
+1. **Assignment types** — the buckets, e.g. "Homework", "Quizzes", "Final Project".
+2. For each one, set the **weight** — how much of the final grade it's worth.
+   🚨 **The weights must add up to exactly 100%.** If they don't, grades come out wrong.
+3. Set the **pass mark** (the grade a student needs to pass, e.g. 60%).
+4. Optionally **drop the lowest N** scores in a bucket, and set a **grace period** for late work.
+
+Then tell each graded subsection which bucket it belongs to: open the subsection, and set its
+assignment type to one of the types you created above.
+
+🚨 Two things that silently produce wrong grades:
+- A subsection's assignment type doesn't exactly match a type you defined.
+- You defined more assignments of a type than actually exist in the course — the missing ones are
+  counted as zeros.
+
+### Course Team
+
+Add other people who may edit this course. **Staff** can edit content; **Admin** can also add and
+remove team members.
+
+## 6. Publish — and what it actually means
+
+Your edits are invisible to students until you publish them. Studio shows each unit's state:
+draft, published, or published-with-unpublished-changes.
+
+- Click the green **Publish** button on a unit to push it live.
+- **Editing an already-published unit un-publishes those changes** — you have to publish again.
+  This catches everyone out.
+
+To hide something deliberately, don't leave it unpublished — use the visibility settings on the
+section or subsection instead, so you don't confuse "not finished" with "not meant to be seen".
+
+## 7. Before you launch — checklist
+
+Run through this before you tell students the course is open:
+
+- [ ] **Course start date** is today or earlier (§5).
+- [ ] **Every unit is published** — check View Live, not Preview (§6).
+- [ ] **Grading weights add up to 100%**, and every graded subsection has an assignment type (§5).
+- [ ] **Course Team** has everyone who needs access (§5).
+- [ ] You've **clicked through the course as a student** would, at least once.
+- [ ] If the course needs a paid membership, the level is set — ask a developer, or see §12.
+
+## 8. Uploading a course somebody sent you
+
+Courses are shared as a single `.tar.gz` file. You may be handed one to load into the platform.
+
+**In Studio:** open the course → **Tools → Import** → choose the file → start the import.
+
+🚨 **Import wipes out whatever is already in that course** and replaces it. If the existing content
+matters, create a fresh course run and import into that instead.
+
+**If you were given a folder rather than a `.tar.gz`**, you need one command to package it. Open
+PowerShell (Windows) or a terminal (Mac/Linux) in the folder that *contains* the course folder:
+
+```bash
+tar -czf course.tar.gz folder_name
+```
+
+Replace `folder_name` with the actual course folder's name. That produces `course.tar.gz`, ready to
+upload.
+
+**To check it's packaged right** before uploading — the listing should show `folder_name/course.xml`
+near the top, not something buried several folders deep:
+
+```bash
+tar tzf course.tar.gz | head
+```
+
+**Going the other way** — to get a copy of a course out of the platform: **Tools → Export**
+downloads the whole course as a `.tar.gz`. Good for backups and for moving a course between sites.
+
+---
+
+# Part 2 — For developers
+
+Everything below is the file format, the command line, and how courses wire into our plugin.
+Course creators don't need any of it.
 
 Worked example throughout: the "Silly Bot" course (`course-v1:SQA+SQA405+2026_T2`), built as OLX in
 `~/silly_bot_course_project`.
 
----
+## 9. OLX — a course as a folder of files
 
-## 1. Course identity (the key)
-
-Every course has an opaque key: `course-v1:<ORG>+<NUMBER>+<RUN>`, e.g.
-`course-v1:SQA+SQA405+2026_T2` (Org `SQA`, number `SQA405`, run `2026_T2`). You choose these when
-you create the course; they're permanent.
-
-## 2. Create a course in Studio (the visual way)
-
-Studio is the course-building tool. It's all point-and-click — no files, no XML.
-
-**Where to log in** (with an account that has Studio access — a superuser, or someone added to the
-course's **Course Team**):
-
-- Production: `https://apps.lms.stemquestacademy.com/authoring/home`
-- Local dev: `http://studio.local.openedx.io:8001`
-
-**Step 1 — make the course.** Click **New Course**, fill in the four fields (Course Name,
-Organization, Course Number, Course Run), click **Create Course**. 🚨 The last three become the
-permanent course key (§1). You can rename the course later; you cannot change these.
-
-**Step 2 — build the structure.** Four levels, each one living inside the one above it:
-
-| Level | What it is |
-|---|---|
-| **Section** | A big chunk — e.g. "Week 1" |
-| **Subsection** | One lesson inside that week |
-| **Unit** | One page the student actually opens |
-| **Component** | The content on that page — text, video, quiz question, discussion |
-
-**Step 3 — set the course up.** Under **Settings**:
-
-- **Schedule & Details** → the **Start date**. 🚨 A course starting in the future is invisible to
-  students.
-- **Grading** → assignment types and the pass mark (§6).
-- **Course Team** → who else is allowed to edit.
-
-**Step 4 — publish.** Hit the green **Publish** button on each unit. 🚨 Unpublished work doesn't
-exist as far as students are concerned, even though you can see it fine.
-
-## 3. OLX — a course as a folder of files
-
-OLX is what a course looks like on disk: a folder full of XML files. Export writes it out, import
-reads it back in. Use it when you want to generate or bulk-edit a course instead of clicking
-through Studio.
-
-**What's in the folder**
+OLX is what a course looks like on disk: a folder of XML files. Export writes it, import reads it.
+Use it to generate or bulk-edit a course instead of clicking through Studio.
 
 | Folder / file | What it holds |
 |---|---|
@@ -69,10 +197,10 @@ through Studio.
 | `static/` | Images, PDFs and other assets |
 | `policies/` | Course settings and the grading rules |
 
-Note the naming: the folders use the *internal* names for the three structure levels — a Section is
-a `chapter`, a Subsection is a `sequential`, a Unit is a `vertical`.
+Note the naming mismatch with the Studio UI: a Section is a `chapter`, a Subsection is a
+`sequential`, a Unit is a `vertical`.
 
-**The same thing, showing how the files point at each other:**
+**How the files point at each other:**
 
 ```
 course/                      ← the importable root
@@ -90,7 +218,7 @@ course/                      ← the importable root
 └── about/overview.html      ← marketing description
 ```
 
-**Examples of the actual content files** (validated against our Open edX version — see
+**Content file examples** (validated against our Open edX version — see
 `silly_bot_course_project/SILLY_BOT_COURSE_BUILD_PLAN.md` §7 for the full set, and the demo course
 for worked examples of every question type: single-select, multi-select, dropdowns, formula and
 math-expression input, multi-part problems, Python-evaluated input, polls, surveys, Staff Graded
@@ -109,7 +237,7 @@ Assignments and LTI):
 </problem>
 ```
 ```xml
-<!-- Python grader that runs IN the sandbox (no network — see §5) -->
+<!-- Python grader that runs IN the sandbox (no network — see §11) -->
 <problem display_name="Your First Reply" showanswer="finished" weight="1.0">
   <script type="loncapa/python"><![CDATA[
 def check_reply(expect, ans):
@@ -123,58 +251,32 @@ def check_reply(expect, ans):
 </problem>
 ```
 
-**Check the files before importing.** Two things:
+**Validate before importing.** Two checks:
 
-1. **Every file is valid XML:**
+1. **Every file is well-formed XML:**
 
     ```bash
     xmllint --noout course/**/*.xml
     ```
 
-2. **Every link resolves** — if a parent file points at a `url_name`, that file has to actually
-   exist, and there should be no leftover files that nothing points at. (The Silly Bot build
-   enforced this as ACs G-a / G-b.)
+2. **Referential integrity** — every `url_name`/`filename` a parent references must resolve to a
+   real file, and there must be no orphan files. (The Silly Bot build enforced this as ACs
+   G-a / G-b.)
 
-## 4. Import & export
+## 10. Import & export from the command line
 
-### Through Studio (the normal way)
-
-**To download a course:** open it → **Tools → Export** → you get a `.tar.gz` file of the OLX.
-
-**To upload a course:** open the course → **Tools → Import** → choose your `.tar.gz` → start the
-import. 🚨 Import **replaces everything** in that course. If the existing content matters, import
-into a throwaway course run first.
-
-**Making the `.tar.gz`.** Put the course folder somewhere, open a terminal there, and zip it up:
-
-```powershell
-# Windows (PowerShell)
-tar -czf course.tar.gz folder_name        # folder_name = the course folder
-```
-```bash
-# Linux / Mac / WSL
-tar -czf course.tar.gz folder_name
-```
-
-🚨 `course.xml` has to sit at the top of the archive. Check before uploading — the first lines
-should show `folder_name/course.xml`, not something buried three folders deep:
-
-```bash
-tar tzf course.tar.gz | head
-```
-
-### From the command line (for automation)
 ```bash
 # dev:
 tutor dev exec cms ./manage.py cms import /openedx/data /openedx/data/<course-dir>
 # k8s:
 tutor k8s exec cms -- ./manage.py cms import ../data <course-dir>
 ```
+
 `manage.py cms import <data_dir> <course_dir>` — first arg is the data root, second the extracted
 course folder. 🚨 The CLI import tends to create a **new run** rather than overwrite; for a clean
-overwrite of an existing run, the Studio UI import is more predictable.
+overwrite of an existing run, the Studio UI import (§8) is more predictable.
 
-## 5. 🚨 The sandbox has no internet (shapes course design)
+## 11. 🚨 The sandbox has no internet (shapes course design)
 
 Open edX's Python grader (`loncapa/python` / `customresponse`) runs in **CodeJail**, a sandbox with
 **no network**. A grader cannot call an external API (Gemini, etc.). Design consequences:
@@ -187,9 +289,11 @@ Open edX's Python grader (`loncapa/python` / `customresponse`) runs in **CodeJai
 CodeJail must be enabled in the deployment for `customresponse` graders to run (it is on this
 project). If a Python problem errors about the sandbox, CodeJail isn't enabled.
 
-## 6. Grading policy
+## 12. Grading policy as a file
 
+The UI in §5 writes this; in OLX you author it directly.
 `policies/<run>/grading_policy.json` defines assignment types and the pass cutoff:
+
 ```json
 {
   "GRADER": [
@@ -199,13 +303,15 @@ project). If a Python problem errors about the sandbox, CodeJail isn't enabled.
   "GRADE_CUTOFFS": { "Pass": 0.60 }
 }
 ```
+
 🚨 Rules: weights must sum to **exactly 1.0**; each graded `<sequential>`'s `format="…"` must match a
 GRADER `type` **exactly**; and `min_count` must equal the actual number of graded subsections of that
 type, or edX pads the grade with phantom zeros.
 
-## 7. How courses connect to our membership plugin
+## 13. How courses connect to our membership plugin
 
 A course can require a membership level two ways:
+
 1. **Django admin** → create a `CourseMembershipRequirement` row directly (course key → required level).
 2. **Studio Advanced Settings** → set `membership_required_level` to a level slug (the field is exposed
    by `ENABLE_OTHER_COURSE_SETTINGS`, runbook 04 §6). On every **publish**, the CMS signal handler
