@@ -11,6 +11,34 @@ Images: `ghcr.io/scient-systems/openedx-indigo`, `ghcr.io/scient-systems/openedx
 
 ---
 
+## 0. ⚠️ CI now builds the images — this runbook is the fallback path
+
+As of **2026-08-05**, images are built by GitHub Actions in
+[`openedx-deploy`](https://github.com/Scient-Systems/openedx-deploy)
+(`.github/workflows/build-images.yml`), driven by `versions.yml`, which pins every input:
+Tutor, the plugin versions, and the four source repos that feed the images.
+
+**Building on a server is now the exception, not the procedure.** It is justified only when CI
+itself is down, and must be followed by a real CI build so the registry and the manifest agree.
+
+Two gotchas below are **superseded** by that pipeline and are kept only for the fallback path:
+
+| Superseded | Why it no longer applies |
+|---|---|
+| §2b "Bust the Docker cache when only `@main` changed" | CI pins the plugin by **commit SHA**, so the layer's cache key changes exactly when the code does. No `--no-cache`, no manual `git ls-remote`. |
+| §4 "The `imagePullPolicy` trap" | CI tags images by `sha256(versions.yml)`, so a changed manifest is **always a new tag**. There is no cached image under that name for k8s to serve. |
+
+Both were mitigations that depended on someone remembering. The pipeline removes the failure
+mode instead of documenting it.
+
+CI also **verifies before pushing**: the openedx image must contain the plugin, import it, and
+its installed commit must equal the SHA `versions.yml` pins; the mfe image must contain the
+compiled payment app. A build fails rather than publishing an image that is missing or stale.
+
+Measured cold builds: **openedx 18m48s**, **mfe 73m32s**.
+
+---
+
 ## 1. One-time setup
 
 ### 1a. Install the Django plugin into the openedx image (Tutor v21 way)
@@ -75,6 +103,7 @@ tutor k8s exec lms -- python manage.py lms migrate sqa_django_app
 ```
 
 ### 🚨 Bust the Docker cache when only `@main` changed
+> **Superseded by CI (see §0)** — kept for the fallback path only.
 The pip URL ends `@main`. Docker caches that layer keyed on the **string**, not the git HEAD — new
 commits to `main` don't invalidate it. Either pin the current SHA, or rebuild `--no-cache`:
 ```bash
@@ -108,6 +137,7 @@ curl -I https://apps.$(tutor config printvalue LMS_HOST)/sqa-payment/      # HTT
 individual MFEs are static bundles inside it.
 
 ## 4. 🚨 The imagePullPolicy trap (re-apply EVERY same-tag push)
+> **Superseded by CI (see §0)** — manifest-hash tags mean the tag is never reused.
 
 k8s uses containerd with `imagePullPolicy: IfNotPresent` by default. If you push a new image under
 the **same tag**, k8s won't re-pull — the node has it cached → your rollout runs the OLD code. You
