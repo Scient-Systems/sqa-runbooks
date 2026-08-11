@@ -28,32 +28,30 @@ set. It silently targets **production**. Set it in every shell. Twice if you're 
 
 ## Prerequisites
 
-1. **SSH access to the box**, with a user that can `sudo` (needed for Caddy) and run
+1. **Ensure that you have access to a VPS** with at least 8 GB of available RAM. 
+2. **Ensure that you have a user account with SSH access to the VPS**, that can `sudo` (needed for Caddy) and run
    `kubectl`.
-2. **A box already running Open edX** under Tutor on k3s, with **host Caddy** on ports 80/443.
-3. **A GitHub token with `read:packages`** on the org that owns the images. Repo access is
+3. **Ensure you have Caddy** as host running on ports 80/443.   
+3. **OpenedX is installed on the VPS** using Tutor on k3s.
+4. **A GitHub token with `read:packages`** on the org that owns the images. Repo access is
    **not** the same thing — see Troubleshooting.
-4. **A domain** you can add DNS records to.
-5. **Spare memory** — roughly 6 GB for the instance, plus ~2.3 GB for each background worker.
-
-> **Why no image rebuild?** The MFE image reads its config from the LMS at runtime, not at
-> build time. Proven: staging and production run the *same image tag* on different hostnames.
-> So a third set of hostnames needs nothing rebuilt.
+5. **A domain** you can add DNS records to.
+6. **Available RAM** — roughly 6 GB for the instance, plus ~2.3 GB for each background worker.
 
 ---
 
 ## Step 0 — Set your variables
 
-Everything below uses these. **Edit the top five, paste the whole block.**
+Everything below uses these. **Edit the top five, paste the whole block.**.
 
 ```bash
-# ---------- EDIT THESE ----------
-export INSTANCE=demo2                                  # short name, no spaces
-export LMS_HOST=training2.stemquestacademy.com         # your main hostname
-export NODEPORT=30082                                  # MUST be unused on this box
-export ADMIN_USER=demoadmin
-export ADMIN_EMAIL=you@example.com
-# ---------- derived, leave alone ----------
+# ---------- REPLACE WITH CORRECT VALUES ----------
+export INSTANCE=[replace with instance name e.g. demo2]                                  # short name, no spaces
+export LMS_HOST=[replace with host name e.g. training2.stemquestacademy.com]         # your main hostname
+export NODEPORT=[replace with port e.g. 30082]                                  # MUST be unused on this box
+export ADMIN_USER=[replace with admin username e.g. demoadmin]
+export ADMIN_EMAIL=[replace with admin email e.g. you@example.com]
+# ---------- CREATE THE FOLLOWING EXACTLY AS THEY ARE ----------
 export NS=openedx-$INSTANCE
 export TUTOR_ROOT=$HOME/.local/share/tutor-$INSTANCE
 export CMS_HOST=studio.$LMS_HOST
@@ -62,7 +60,7 @@ export FILES_HOST=files.$LMS_HOST
 export PATH=$HOME/.local/bin:$PATH
 ```
 
-**Check the NodePort is free before you commit to it:**
+**Get the list of occupied ports which are free**
 
 ```bash
 kubectl get svc -A -o jsonpath='{range .items[*].spec.ports[*]}{.nodePort}{"\n"}{end}' | sort -un | tail -20
@@ -74,9 +72,9 @@ auto-assigns those — you don't manage them.)
 
 ---
 
-## Step 1 — DNS: four names, not one
+## Step 1 — DNS: four domain names
 
-Open edX needs **four** hostnames. Three are derived from `LMS_HOST` automatically:
+OpenedX needs **four** hostnames. Three are derived from `LMS_HOST` automatically:
 
 | What | Hostname |
 |---|---|
@@ -85,43 +83,33 @@ Open edX needs **four** hostnames. Three are derived from `LMS_HOST` automatical
 | MFEs (newer UI pages) | `apps.training2.…` |
 | Uploads / media | `files.training2.…` |
 
-Add either **one A record + a wildcard**, or four A records, all pointing at the box IP:
+Add either **one A record + a wildcard**, or four A records, all pointing at the VPS IP:
 
 ```
-A      training2              <BOX_IP>
-A      *.training2            <BOX_IP>
+A      [replace with domain name e.g training2]              <VPS_IP>
+A      [replace with wildcard domain e.g. *.training2]            <VPS_IP>
 ```
 
-**Verify before moving on:**
+**Verify DNS Records have propagated:**
 
 ```bash
 for h in $LMS_HOST $CMS_HOST $MFE_HOST $FILES_HOST; do printf '%-45s ' "$h"; dig +short "$h" A @8.8.8.8 | tail -1; done
 ```
 
-All four must print your box IP.
-
-> 🚨 **A missing record fails silently.** If the domain has a catch-all (Vercel, Cloudflare
-> redirect, etc.), a typo resolves to *something else* and serves the wrong site instead of an
-> obvious error. Always `dig`. Never assume.
-
-> **`files.` is not optional.** It serves every uploaded image and video. Skip it and course
-> media breaks in a way that looks like a broken import.
+All four domains must point to your VPS IP in order to consider it a success. 
 
 ---
 
 ## Step 2 — Caddy vhost + TLS certificates
 
-Certificates must exist **before** Step 6 (`init`), because init uploads files to
-`https://files.<host>`. No cert = init dies halfway and leaves a half-built database.
-
-Append this block to `/etc/caddy/Caddyfile` (keep every existing block):
+Append this block to `/etc/caddy/Caddyfile` (keep existing block):
 
 ```caddy
 # ---- Open edX: INSTANCE ----
-training2.stemquestacademy.com,
-studio.training2.stemquestacademy.com,
-apps.training2.stemquestacademy.com,
-files.training2.stemquestacademy.com {
+[replace with LMS domain e.g. training2.stemquestacademy.com],
+[replace with studio domain e.g. studio.training2.stemquestacademy.com],
+[replace with MFE Apps domain e.g. apps.training2.stemquestacademy.com],
+[replace with Files domain e.g. files.training2.stemquestacademy.com] {
 	reverse_proxy 127.0.0.1:30082
 	request_body {
 		max_size 300MB
