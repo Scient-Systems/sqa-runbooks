@@ -104,7 +104,18 @@ All four domains must point to your VPS IP in order to consider it a success.
 
 Append this block to `/etc/caddy/Caddyfile` (keep existing block):
 
-```caddy
+### Step 2.1
+```Execute this command
+sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%F-%H%M)   # backup
+```
+
+### Step 2.2
+```Execute this command and paste the caddy text with updated values
+sudo nano /etc/caddy/Caddyfile 
+```
+
+```caddy text
+
 # ---- Open edX: INSTANCE ----
 [replace with LMS domain e.g. training2.stemquestacademy.com],
 [replace with studio domain e.g. studio.training2.stemquestacademy.com],
@@ -117,28 +128,33 @@ Append this block to `/etc/caddy/Caddyfile` (keep existing block):
 }
 ```
 
-Safe way to apply it — **validate before you touch `/etc`**:
-
-```bash
-sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%F-%H%M)   # backup
-sudo nano /etc/caddy/Caddyfile                                            # paste the block
+### Step 2.3 
+```Execute this command.                                          
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile          # no sudo needed
+```
+
+### Step 2.4 
+```Execute this command.                                          
 sudo systemctl reload caddy
 ```
 
-> 🚨 **`reload`, never `restart`.** A restart drops every other site on the box at the same
-> time. `reload` is graceful. Confirm nothing restarted:
+Note: The above command reloads caddy instead of restarting it because a restart drops every other site on the VPS at the same time.
+
+### Step 2.5
+```Optional Step: Execute this command to confirm nothing restarted
 > `systemctl show caddy -p ActiveEnterTimestamp` — the timestamp should be old.
+```
 
-**Get the certificates issued** (just requesting the URL triggers it):
-
-```bash
+### Step 2.6
+```Execute this command to get the certificates issued (just requesting the URL triggers it):
 for h in $LMS_HOST $CMS_HOST $MFE_HOST $FILES_HOST; do printf '%-45s ' "$h"; curl -s -o /dev/null -w '%{http_code} ssl=%{ssl_verify_result}\n' "https://$h/"; done
 ```
 
-✅ Expect **`502 ssl=0`** for all four. `502` is *correct* — nothing is listening on your
-NodePort yet. `ssl=0` means the certificate is valid. If you get `000`, TLS failed:
+### Step 2.7
+```Execute this command to verify the certificates are correctly issued:
 `sudo journalctl -u caddy -n 50`.
+```
+How To Validate Certificates: Expect **`502 ssl=0`** for all four. `502` is *correct* — nothing is listening on your NodePort yet. `ssl=0` means the certificate is valid. If you get `000`, TLS failed.
 
 ---
 
