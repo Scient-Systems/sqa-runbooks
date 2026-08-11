@@ -238,14 +238,19 @@ tutor plugins enable mfe minio indigo codejail \
 
 (`indigo` and `mfe` switch themselves on — that's normal.)
 
-**Now the config.** Copy the image tags from the instance already running, so you reuse images
-already on the box:
+**Now the config.** You need two image tags. **Don't invent them** — read them off the instance
+already running on this box, so the new one reuses images that are already downloaded.
 
 ```bash
-export SRC=$HOME/.local/share/tutor          # the existing instance
-export IMG_OPENEDX=$(TUTOR_ROOT=$SRC tutor config printvalue DOCKER_IMAGE_OPENEDX)
-export IMG_MFE=$(TUTOR_ROOT=$SRC tutor config printvalue MFE_DOCKER_IMAGE)
-echo "$IMG_OPENEDX / $IMG_MFE"
+export SRC=$HOME/.local/share/tutor   # TUTOR_ROOT of the EXISTING instance (used again later)
+export SRC_NS=openedx                 # namespace of the EXISTING instance (not your new one)
+
+# Read the tags from the pods that are actually running
+export IMG_OPENEDX=$(kubectl -n $SRC_NS get deploy lms -o jsonpath='{.spec.template.spec.containers[0].image}')
+export IMG_MFE=$(kubectl -n $SRC_NS get deploy mfe -o jsonpath='{.spec.template.spec.containers[0].image}')
+
+echo "openedx: $IMG_OPENEDX"   # e.g. ghcr.io/scient-systems/openedx:21.0.2
+echo "mfe:     $IMG_MFE"       # e.g. ghcr.io/scient-systems/openedx-mfe:21.0.0-indigo
 
 tutor config save \
   --set LMS_HOST=$LMS_HOST \
@@ -261,9 +266,29 @@ tutor config save \
   --set MFE_DOCKER_IMAGE=$IMG_MFE
 ```
 
+**Check both images are already on the node** — this is what makes startup take minutes
+instead of a ~4 GB download:
+
+```bash
+sudo k3s crictl images | grep openedx
+```
+
+### Where image tags come from
+
+Three sources. They usually agree. When they don't, believe the pods.
+
+| Source | Command | Trust it? |
+|---|---|---|
+| **The running pods** | `kubectl -n <ns> get deploy lms -o jsonpath='{.spec.template.spec.containers[0].image}'` | ✅ **Use this.** What is actually serving traffic |
+| The other instance's config | `TUTOR_ROOT=$SRC tutor config printvalue DOCKER_IMAGE_OPENEDX` | What the config *claims*. Can drift from what was deployed |
+| Cached on the node | `sudo k3s crictl images \| grep openedx` | What will start instantly — good cross-check, but lists old tags too |
+
 Gotchas baked into that block:
 
-- It's **`MFE_DOCKER_IMAGE`**, not `DOCKER_IMAGE_MFE`. The second one doesn't exist.
+- It's **`MFE_DOCKER_IMAGE`**, not `DOCKER_IMAGE_MFE`. The second one doesn't exist — it fails
+  with `Missing configuration value`. The two key names are not symmetrical.
+- **These are plain image references**, `registry/name:tag`. Nothing generates them for you and
+  there is no "latest" to fall back on — whatever you set is what the pods pull.
 - **Set `MFE_HOST` explicitly** even though it looks derivable — it's stored as a literal and
   won't re-derive later.
 - `ENABLE_WEB_PROXY=false` stops Tutor fighting host Caddy for ports 80/443.
