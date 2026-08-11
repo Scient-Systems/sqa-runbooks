@@ -26,15 +26,15 @@ set. It silently targets **production**. Set it in every shell. Twice if you're 
 
 ---
 
-## Before you start
+## Prerequisites
 
-You need:
-
-- A box already running Open edX under Tutor on k3s, with **host Caddy** on ports 80/443.
-- SSH access, and a user who can `sudo` (for Caddy) and run `kubectl`.
-- A **GitHub token with `read:packages`** on the org that owns the images. Repo access is
-  **not** the same thing — see Troubleshooting.
-- A domain you can add DNS records to.
+1. **SSH access to the box**, with a user that can `sudo` (needed for Caddy) and run
+   `kubectl`.
+2. **A box already running Open edX** under Tutor on k3s, with **host Caddy** on ports 80/443.
+3. **A GitHub token with `read:packages`** on the org that owns the images. Repo access is
+   **not** the same thing — see Troubleshooting.
+4. **A domain** you can add DNS records to.
+5. **Spare memory** — roughly 6 GB for the instance, plus ~2.3 GB for each background worker.
 
 > **Why no image rebuild?** The MFE image reads its config from the LMS at runtime, not at
 > build time. Proven: staging and production run the *same image tag* on different hostnames.
