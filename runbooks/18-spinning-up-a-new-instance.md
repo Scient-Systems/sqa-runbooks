@@ -225,8 +225,9 @@ Note: Leave `SQA_STRIPE_PRICE_TO_LEVEL` empty unless you're demoing payments —
 
 ### Step 5 — Enable plugins, then set config (the order matters)
 
-**Enable first.** Plugin-specific config keys don't exist until the plugin is on, so setting
-config first fails.
+
+### Step 5.1 - Enable the plugins first
+Note: We need to enable the plugin first as Plugin-specific config keys don't exist until the plugin is on.
 
 ```bash
 tutor plugins enable mfe minio indigo codejail \
@@ -234,10 +235,8 @@ tutor plugins enable mfe minio indigo codejail \
   sqa_payment sqa_stripe_$INSTANCE host_proxy_nodeport_$INSTANCE
 ```
 
-(`indigo` and `mfe` switch themselves on — that's normal.)
-
-**Now the config.** You need two image tags. **Don't invent them** — read them off the instance
-already running on this box, so the new one reuses images that are already downloaded.
+### STEP 5.2 - Find the current image tag running.
+Note: We need two image tags. One for the Openedx image, one for the MFE image. It's advised to read them off the instance already running on this box, so the new one reuses images that are already downloaded.
 
 ```bash
 export SRC=$HOME/.local/share/tutor   # TUTOR_ROOT of the EXISTING instance (used again later)
