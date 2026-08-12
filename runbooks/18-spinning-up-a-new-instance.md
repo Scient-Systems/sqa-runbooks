@@ -74,7 +74,7 @@ auto-assigns those — you don't manage them.)
 
 ## Step 1 — DNS: four domain names
 
-OpenedX needs **four** hostnames. Three are derived from `LMS_HOST` automatically:
+Note: OpenedX needs **four** hostnames. Three are derived from `LMS_HOST` automatically:
 
 | What | Hostname |
 |---|---|
@@ -96,13 +96,11 @@ A      [replace with wildcard domain e.g. *.training2]            <VPS_IP>
 for h in $LMS_HOST $CMS_HOST $MFE_HOST $FILES_HOST; do printf '%-45s ' "$h"; dig +short "$h" A @8.8.8.8 | tail -1; done
 ```
 
-All four domains must point to your VPS IP in order to consider it a success. 
+Note: All four domains must point to your VPS IP in order to consider it a success. 
 
 ---
 
 ## Step 2 — Caddy vhost + TLS certificates
-
-Append this block to `/etc/caddy/Caddyfile` (keep existing block):
 
 ### Step 2.1
 ```Execute this command
@@ -110,7 +108,7 @@ sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%F-%H%M)   # backu
 ```
 
 ### Step 2.2
-```Execute this command and paste the caddy text with updated values
+```Execute this command and append the file below with the following caddy text
 sudo nano /etc/caddy/Caddyfile 
 ```
 
@@ -158,27 +156,24 @@ How To Validate Certificates: Expect **`502 ssl=0`** for all four. `502` is *cor
 
 ---
 
-## Step 3 — Tutor config (its own secrets)
+## Step 3 — Generate Tutor secrets 
 
 ```bash
 mkdir -p "$TUTOR_ROOT"
 tutor config save        # generates BRAND NEW secrets
 ```
 
-> 🚨 **Never copy another instance's `config.yml`.** Sharing secrets means a login token from
-> one instance is valid on the other. Two platforms, two sets of keys. Always.
+
+Note: **Never copy another instance's `config.yml`** because sharing secrets between instances is invalid.
 
 ---
 
-## Step 4 — Plugin files
+## Step 4 — Install Plugins: NodePort, Payment MFE
 
-Two small Python files. Both go in `~/.local/share/tutor-plugins/` (shared by all instances —
-the files only *define* plugins; each instance chooses which to *enable*).
+### Step 4.1 - Install NodePort Bridge Plugin
+Note: Tutor's internal Caddy isn't reachable from the host, so we must publish it on our NodePort
 
-**4a. The NodePort bridge.** Tutor's internal Caddy isn't reachable from the host, so publish
-it on your NodePort:
-
-```bash
+```Execute this command to add the plugin
 cat > ~/.local/share/tutor-plugins/host_proxy_nodeport_$INSTANCE.py <<EOF
 from tutor import hooks
 
@@ -206,10 +201,10 @@ spec:
 EOF
 ```
 
-**4b. Payment MFE URL.** If you have a `sqa_stripe_*` plugin, it hardcodes the *production*
-MFE URL. Make your own so the new instance points at itself:
+### Step 4.2 - Install the Payment MFE URL Plugin
+Note: If you have a `sqa_stripe_*` plugin, it hardcodes the *production* MFE URL so we will make a new plugin that points to itself.
 
-```bash
+```Execute this command to add the plugin
 cat > ~/.local/share/tutor-plugins/sqa_stripe_$INSTANCE.py <<EOF
 from tutor import hooks
 
@@ -224,12 +219,11 @@ FEATURES["ENABLE_OTHER_COURSE_SETTINGS"] = True
 EOF
 ```
 
-Leave `SQA_STRIPE_PRICE_TO_LEVEL` empty unless you're demoing payments — then fill it from the
-Stripe **test** dashboard. Never paste live price IDs.
+Note: Leave `SQA_STRIPE_PRICE_TO_LEVEL` empty unless you're demoing payments — then fill it from the Stripe **test** dashboard. Never paste live price IDs.
 
 ---
 
-## Step 5 — Enable plugins, then set config (this order matters)
+### Step 5 — Enable plugins, then set config (the order matters)
 
 **Enable first.** Plugin-specific config keys don't exist until the plugin is on, so setting
 config first fails.
