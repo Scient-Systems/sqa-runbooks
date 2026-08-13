@@ -1,9 +1,9 @@
 # 18 — Spinning up a new Open edX instance (copy-paste guide)
 
 You have a working Open edX. You want **another one** — a demo for a client, a sandbox, a
-second brand — on a box that already runs one.
+second brand — on a VPS that already runs one.
 
-This page is every command, in order, start to finish. Set five variables at the top and the
+This page is every command, in order, start to finish. Set five variables in Step 0 and the
 rest is paste-and-go.
 
 ---
@@ -15,40 +15,41 @@ DNS (4 names) → Caddy + TLS → Tutor config → plugins → start → init �
 ```
 
 - **~45–60 min**, of which `tutor k8s init` is ~18 min of waiting.
-- **No image rebuild.** You reuse the images already on the box.
+- **No image rebuild.** You reuse the images already on the VPS.
 - The new instance gets **its own database, its own users, its own secrets**. It shares only
   the server and the Docker images.
-- Four things must be **different** from every other instance on the box: `TUTOR_ROOT`,
+- Four things must be **different** from every other instance on the VPS: `TUTOR_ROOT`,
   Kubernetes namespace, the Caddy NodePort, and the hostnames.
 
-**The single biggest way to cause an outage:** running a `tutor` command without `TUTOR_ROOT`
-set. It silently targets **production**. Set it in every shell. Twice if you're tired.
+Note: the single biggest way to cause an outage is running a `tutor` command without
+`TUTOR_ROOT` set. It silently targets **production**. Set it in every shell. Twice if you're
+tired.
 
 ---
 
 ## Prerequisites
 
-1. **Ensure that you have access to a VPS** with at least 8 GB of available RAM. 
-2. **Ensure that you have a user account with SSH access to the VPS**, that can `sudo` (needed for Caddy) and run
-   `kubectl`.
-3. **Ensure you have Caddy** as host running on ports 80/443.   
-3. **OpenedX is installed on the VPS** using Tutor on k3s.
-4. **A GitHub token with `read:packages`** on the org that owns the images. Repo access is
+1. **Ensure that you have access to a VPS** with at least 8 GB of available RAM.
+2. **Ensure that you have a user account with SSH access to the VPS**, that can `sudo` (needed
+   for Caddy) and run `kubectl`.
+3. **Ensure you have Caddy** running on the host on ports 80/443.
+4. **Ensure OpenedX is installed on the VPS** using Tutor on k3s.
+5. **A GitHub token with `read:packages`** on the org that owns the images. Repo access is
    **not** the same thing — see Troubleshooting.
-5. **A domain** you can add DNS records to.
-6. **Available RAM** — roughly 6 GB for the instance, plus ~2.3 GB for each background worker.
+6. **A domain** you can add DNS records to.
+7. **Available RAM** — roughly 6 GB for the instance, plus ~2.3 GB for each background worker.
 
 ---
 
 ## Step 0 — Set your variables
 
-Everything below uses these. **Edit the top five, paste the whole block.**.
+### Step 0.1 - Set the variables
 
 ```bash
 # ---------- REPLACE WITH CORRECT VALUES ----------
-export INSTANCE=[replace with instance name e.g. demo2]                                  # short name, no spaces
-export LMS_HOST=[replace with host name e.g. training2.stemquestacademy.com]         # your main hostname
-export NODEPORT=[replace with port e.g. 30082]                                  # MUST be unused on this box
+export INSTANCE=[replace with instance name e.g. demo2]                       # short name, no spaces
+export LMS_HOST=[replace with host name e.g. training2.stemquestacademy.com]  # your main hostname
+export NODEPORT=[replace with port e.g. 30082]                                # MUST be unused on this VPS
 export ADMIN_USER=[replace with admin username e.g. demoadmin]
 export ADMIN_EMAIL=[replace with admin email e.g. you@example.com]
 # ---------- CREATE THE FOLLOWING EXACTLY AS THEY ARE ----------
@@ -60,21 +61,23 @@ export FILES_HOST=files.$LMS_HOST
 export PATH=$HOME/.local/bin:$PATH
 ```
 
-**Get the list of occupied ports which are free**
+Note: everything below uses these. Edit the top five, then paste the whole block.
+
+### Step 0.2 - Check your NodePort is free
 
 ```bash
 kubectl get svc -A -o jsonpath='{range .items[*].spec.ports[*]}{.nodePort}{"\n"}{end}' | sort -un | tail -20
 ```
 
-NodePorts are unique **across the whole cluster**, not per namespace. Production usually uses
-`30080`. Pick something else. (`mfe` and `minio` also create NodePorts, but Kubernetes
-auto-assigns those — you don't manage them.)
+Note: this lists the ports already taken — yours must **not** be in the list. NodePorts are
+unique across the whole cluster, not per namespace. Production usually uses `30080`, so pick
+something else.
 
 ---
 
 ## Step 1 — DNS: four domain names
 
-Note: OpenedX needs **four** hostnames. Three are derived from `LMS_HOST` automatically:
+Note: OpenedX needs **four** hostnames. Three are derived from `LMS_HOST` automatically.
 
 | What | Hostname |
 |---|---|
@@ -83,97 +86,125 @@ Note: OpenedX needs **four** hostnames. Three are derived from `LMS_HOST` automa
 | MFEs (newer UI pages) | `apps.training2.…` |
 | Uploads / media | `files.training2.…` |
 
-Add either **one A record + a wildcard**, or four A records, all pointing at the VPS IP:
+### Step 1.1 - Add the DNS records
 
 ```
-A      [replace with domain name e.g training2]              <VPS_IP>
-A      [replace with wildcard domain e.g. *.training2]            <VPS_IP>
+A      [replace with domain name e.g training2]        <VPS_IP>
+A      [replace with wildcard domain e.g. *.training2] <VPS_IP>
 ```
 
-**Verify DNS Records have propagated:**
+Note: add either **one A record + a wildcard** (above), or four A records — all pointing at the
+VPS IP.
+
+Note: `files.` is not optional — it serves every uploaded image and video.
+
+### Step 1.2 - Verify the DNS records have propagated
 
 ```bash
 for h in $LMS_HOST $CMS_HOST $MFE_HOST $FILES_HOST; do printf '%-45s ' "$h"; dig +short "$h" A @8.8.8.8 | tail -1; done
 ```
 
-Note: All four domains must point to your VPS IP in order to consider it a success. 
+Note: all four domains must print your VPS IP in order to consider it a success. A missing
+record fails silently if your domain has a catch-all — always `dig`, never assume.
 
 ---
 
 ## Step 2 — Caddy vhost + TLS certificates
 
-### Step 2.1
-```Execute this command
-sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%F-%H%M)   # backup
+Note: certificates must exist **before** Step 6 (`init`), because init uploads files to
+`https://files.<host>`. No cert = init dies halfway and leaves a half-built database.
+
+### Step 2.1 - Back up the current Caddyfile
+
+```bash
+sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%F-%H%M)
 ```
 
-### Step 2.2
-```Execute this command and append the file below with the following caddy text
-sudo nano /etc/caddy/Caddyfile 
+### Step 2.2 - Open the Caddyfile and append the block below
+
+```bash
+sudo nano /etc/caddy/Caddyfile
 ```
 
-```caddy text
-
+```caddy
 # ---- Open edX: INSTANCE ----
 [replace with LMS domain e.g. training2.stemquestacademy.com],
 [replace with studio domain e.g. studio.training2.stemquestacademy.com],
 [replace with MFE Apps domain e.g. apps.training2.stemquestacademy.com],
 [replace with Files domain e.g. files.training2.stemquestacademy.com] {
-	reverse_proxy 127.0.0.1:30082
+	reverse_proxy 127.0.0.1:[replace with your NODEPORT e.g. 30082]
 	request_body {
 		max_size 300MB
 	}
 }
 ```
 
-### Step 2.3 
-```Execute this command.                                          
-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile          # no sudo needed
+Note: append this block to the end of the file, keeping every existing block.
+
+### Step 2.3 - Validate the Caddyfile before applying it
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
 
-### Step 2.4 
-```Execute this command.                                          
+Note: no `sudo` needed here.
+
+### Step 2.4 - Reload Caddy
+
+```bash
 sudo systemctl reload caddy
 ```
 
-Note: The above command reloads caddy instead of restarting it because a restart drops every other site on the VPS at the same time.
+Note: reload Caddy, never restart it — a restart drops every other site on the VPS at the same
+time.
 
-### Step 2.5
-```Optional Step: Execute this command to confirm nothing restarted
-> `systemctl show caddy -p ActiveEnterTimestamp` — the timestamp should be old.
+### Step 2.5 - (Optional) Confirm nothing restarted
+
+```bash
+systemctl show caddy -p ActiveEnterTimestamp
 ```
 
-### Step 2.6
-```Execute this command to get the certificates issued (just requesting the URL triggers it):
+Note: the timestamp should be old. A fresh timestamp means Caddy restarted instead of reloading.
+
+### Step 2.6 - Get the certificates issued
+
+```bash
 for h in $LMS_HOST $CMS_HOST $MFE_HOST $FILES_HOST; do printf '%-45s ' "$h"; curl -s -o /dev/null -w '%{http_code} ssl=%{ssl_verify_result}\n' "https://$h/"; done
 ```
 
-### Step 2.7
-```Execute this command to verify the certificates are correctly issued:
-`sudo journalctl -u caddy -n 50`.
+Note: just requesting the URL is what triggers the certificate.
+
+Note: expect **`502 ssl=0`** for all four. `502` is *correct* — nothing is listening on your
+NodePort yet. `ssl=0` means the certificate is valid. If you get `000`, TLS failed.
+
+### Step 2.7 - If TLS failed, read the Caddy log
+
+```bash
+sudo journalctl -u caddy -n 50
 ```
-How To Validate Certificates: Expect **`502 ssl=0`** for all four. `502` is *correct* — nothing is listening on your NodePort yet. `ssl=0` means the certificate is valid. If you get `000`, TLS failed.
 
 ---
 
-## Step 3 — Generate Tutor secrets 
+## Step 3 — Generate Tutor secrets
+
+### Step 3.1 - Create the Tutor root and generate secrets
 
 ```bash
 mkdir -p "$TUTOR_ROOT"
 tutor config save        # generates BRAND NEW secrets
 ```
 
-
-Note: **Never copy another instance's `config.yml`** because sharing secrets between instances is invalid.
+Note: never copy another instance's `config.yml`. Sharing secrets means a login token from one
+instance is valid on the other.
 
 ---
 
-## Step 4 — Install Plugins: NodePort, Payment MFE
+## Step 4 — Install plugins: NodePort, Payment MFE
 
-### Step 4.1 - Install NodePort Bridge Plugin
-Note: Tutor's internal Caddy isn't reachable from the host, so we must publish it on our NodePort
+### Step 4.1 - Install the NodePort bridge plugin
 
-```Execute this command to add the plugin
+```bash
+mkdir -p ~/.local/share/tutor-plugins
 cat > ~/.local/share/tutor-plugins/host_proxy_nodeport_$INSTANCE.py <<EOF
 from tutor import hooks
 
@@ -201,10 +232,12 @@ spec:
 EOF
 ```
 
-### Step 4.2 - Install the Payment MFE URL Plugin
-Note: If you have a `sqa_stripe_*` plugin, it hardcodes the *production* MFE URL so we will make a new plugin that points to itself.
+Note: Tutor's internal Caddy isn't reachable from the host, so we must publish it on our
+NodePort.
 
-```Execute this command to add the plugin
+### Step 4.2 - Install the Payment MFE URL plugin
+
+```bash
 cat > ~/.local/share/tutor-plugins/sqa_stripe_$INSTANCE.py <<EOF
 from tutor import hooks
 
@@ -219,15 +252,17 @@ FEATURES["ENABLE_OTHER_COURSE_SETTINGS"] = True
 EOF
 ```
 
-Note: Leave `SQA_STRIPE_PRICE_TO_LEVEL` empty unless you're demoing payments — then fill it from the Stripe **test** dashboard. Never paste live price IDs.
+Note: if you have a `sqa_stripe_*` plugin, it hardcodes the *production* MFE URL, so we make a
+new plugin that points to itself.
+
+Note: leave `SQA_STRIPE_PRICE_TO_LEVEL` empty unless you're demoing payments — then fill it
+from the Stripe **test** dashboard. Never paste live price IDs.
 
 ---
 
-### Step 5 — Enable plugins, then set config (the order matters)
-
+## Step 5 — Enable plugins, then set config
 
 ### Step 5.1 - Enable the plugins first
-Note: We need to enable the plugin first as Plugin-specific config keys don't exist until the plugin is on.
 
 ```bash
 tutor plugins enable mfe minio indigo codejail \
@@ -235,20 +270,38 @@ tutor plugins enable mfe minio indigo codejail \
   sqa_payment sqa_stripe_$INSTANCE host_proxy_nodeport_$INSTANCE
 ```
 
-### STEP 5.2 - Find the current image tag running.
-Note: We need two image tags. One for the Openedx image, one for the MFE image. It's advised to read them off the instance already running on this box, so the new one reuses images that are already downloaded.
+Note: the order matters — enable the plugins first, because plugin-specific config keys don't
+exist until the plugin is on.
+
+### Step 5.2 - Find the image tags currently running
 
 ```bash
 export SRC=$HOME/.local/share/tutor   # TUTOR_ROOT of the EXISTING instance (used again later)
 export SRC_NS=openedx                 # namespace of the EXISTING instance (not your new one)
 
-# Read the tags from the pods that are actually running
 export IMG_OPENEDX=$(kubectl -n $SRC_NS get deploy lms -o jsonpath='{.spec.template.spec.containers[0].image}')
 export IMG_MFE=$(kubectl -n $SRC_NS get deploy mfe -o jsonpath='{.spec.template.spec.containers[0].image}')
 
 echo "openedx: $IMG_OPENEDX"   # e.g. ghcr.io/scient-systems/openedx:21.0.2
 echo "mfe:     $IMG_MFE"       # e.g. ghcr.io/scient-systems/openedx-mfe:21.0.0-indigo
+```
 
+Note: we need two image tags — one for the Openedx image, one for the MFE image. Read them off
+the instance already running on this VPS, so the new one reuses images that are already
+downloaded.
+
+Note: there are three places an image tag can come from, and they usually agree. When they
+don't, believe the pods.
+
+| Source | Command | Trust it? |
+|---|---|---|
+| **The running pods** | `kubectl -n <ns> get deploy lms -o jsonpath='{.spec.template.spec.containers[0].image}'` | ✅ **Use this.** What is actually serving traffic |
+| The other instance's config | `TUTOR_ROOT=$SRC tutor config printvalue DOCKER_IMAGE_OPENEDX` | What the config *claims*. Can drift from what was deployed |
+| Cached on the node | `sudo k3s crictl images \| grep openedx` | What will start instantly — good cross-check, but lists old tags too |
+
+### Step 5.3 - Save the config
+
+```bash
 tutor config save \
   --set LMS_HOST=$LMS_HOST \
   --set CMS_HOST=$CMS_HOST \
@@ -263,116 +316,130 @@ tutor config save \
   --set MFE_DOCKER_IMAGE=$IMG_MFE
 ```
 
-**Check both images are already on the node** — this is what makes startup take minutes
-instead of a ~4 GB download:
+Note: it's **`MFE_DOCKER_IMAGE`**, not `DOCKER_IMAGE_MFE`. The second one doesn't exist — it
+fails with `Missing configuration value`. The two key names are not symmetrical.
+
+Note: set `MFE_HOST` explicitly even though it looks derivable — it's stored as a literal and
+won't re-derive later.
+
+Note: `ENABLE_WEB_PROXY=false` stops Tutor fighting host Caddy for ports 80/443, and
+`ENABLE_HTTPS=true` keeps generated links on `https://`.
+
+### Step 5.4 - Check both images are already on the node
 
 ```bash
 sudo k3s crictl images | grep openedx
 ```
 
-### Where image tags come from
+Note: both tags from Step 5.2 should appear. This is what makes startup take minutes instead of
+a ~4 GB download.
 
-Three sources. They usually agree. When they don't, believe the pods.
-
-| Source | Command | Trust it? |
-|---|---|---|
-| **The running pods** | `kubectl -n <ns> get deploy lms -o jsonpath='{.spec.template.spec.containers[0].image}'` | ✅ **Use this.** What is actually serving traffic |
-| The other instance's config | `TUTOR_ROOT=$SRC tutor config printvalue DOCKER_IMAGE_OPENEDX` | What the config *claims*. Can drift from what was deployed |
-| Cached on the node | `sudo k3s crictl images \| grep openedx` | What will start instantly — good cross-check, but lists old tags too |
-
-Gotchas baked into that block:
-
-- It's **`MFE_DOCKER_IMAGE`**, not `DOCKER_IMAGE_MFE`. The second one doesn't exist — it fails
-  with `Missing configuration value`. The two key names are not symmetrical.
-- **These are plain image references**, `registry/name:tag`. Nothing generates them for you and
-  there is no "latest" to fall back on — whatever you set is what the pods pull.
-- **Set `MFE_HOST` explicitly** even though it looks derivable — it's stored as a literal and
-  won't re-derive later.
-- `ENABLE_WEB_PROXY=false` stops Tutor fighting host Caddy for ports 80/443.
-  `ENABLE_HTTPS=true` keeps generated links on `https://`.
-
-**Sanity check:**
+### Step 5.5 - Sanity check the config
 
 ```bash
 for k in LMS_HOST CMS_HOST MFE_HOST MINIO_HOST K8S_NAMESPACE ENABLE_WEB_PROXY; do printf '%-18s ' $k; tutor config printvalue $k; done
 ```
 
-`MINIO_HOST` should have derived to `files.<your host>` on its own.
+Note: `MINIO_HOST` should have derived to `files.<your host>` on its own.
 
-**Prove the secrets are different** (one command, non-negotiable):
+### Step 5.6 - Prove the secrets are different
 
 ```bash
 TUTOR_ROOT=$SRC        tutor config printvalue OPENEDX_SECRET_KEY | sha256sum
 TUTOR_ROOT=$TUTOR_ROOT tutor config printvalue OPENEDX_SECRET_KEY | sha256sum
 ```
 
-The two hashes **must differ**. If they match, you copied a config — go back to Step 3.
+Note: the two hashes **must differ**. If they match, you copied a config — go back to Step 3.
 
 ---
 
 ## Step 6 — Namespace, image pull secret, start, init
 
+### Step 6.1 - Create the namespace
+
 ```bash
 kubectl create namespace $NS
+```
 
+### Step 6.2 - Create the image pull secret
+
+```bash
 kubectl -n $NS create secret docker-registry ghcr-pull \
   --docker-server=ghcr.io \
   --docker-username=YOUR_GITHUB_USER \
   --docker-password=YOUR_TOKEN
+```
 
+### Step 6.3 - Attach the pull secret to the default ServiceAccount
+
+```bash
 kubectl -n $NS patch serviceaccount default \
   -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}'
 ```
 
-> **Why the patch?** No Tutor manifest mentions the pull secret. Attaching it to the namespace's
-> default ServiceAccount is what makes every pod use it.
+Note: no Tutor manifest mentions the pull secret. Attaching it to the namespace's default
+ServiceAccount is what makes every pod use it.
 
-**Start:**
+### Step 6.4 - Start the instance
 
 ```bash
 tutor k8s start
 kubectl -n $NS get pods -w        # Ctrl-C when everything is Running
 ```
 
-**Then initialise** — this is the ~18 minute one:
+### Step 6.5 - Initialise the instance
 
 ```bash
 tutor k8s init
 ```
 
-✅ Ends with `All services initialised.`
+Note: this is the ~18 minute one. ✅ It ends with `All services initialised.`
 
-> 🚨 Don't blind-retry a failed init. Look first:
-> `kubectl -n $NS get jobs` then `kubectl -n $NS logs job/<name> --tail=50`.
-> A half-initialised database is worth deleting and redoing:
-> `kubectl delete namespace $NS` then start again.
+Note: don't blind-retry a failed init. Look first with `kubectl -n $NS get jobs`, then
+`kubectl -n $NS logs job/<name> --tail=50`. A half-initialised database is worth deleting and
+redoing — `kubectl delete namespace $NS`, then start again.
 
 ---
 
 ## Step 7 — Theme, admin user, search
 
+### Step 7.1 - Set the theme
+
 ```bash
 tutor k8s do settheme indigo
+```
 
+Note: the theme takes 30–60 seconds to show up. An unstyled page right after `settheme` is
+normal.
+
+### Step 7.2 - Create the admin user
+
+```bash
 tutor k8s do createuser --staff --superuser -p 'CHANGE_ME_STRONG' $ADMIN_USER $ADMIN_EMAIL
+```
 
+### Step 7.3 - Build the two search indexes
+
+```bash
 tutor k8s exec cms ./manage.py cms reindex_studio --init    # Studio's own search
 tutor k8s exec cms ./manage.py cms reindex_course --setup   # the PUBLIC /courses catalog
 ```
 
-> **Two different search indexes.** `reindex_studio` does **not** make courses appear in the
-> public catalog. You need `reindex_course` for that. Run it again after every course import.
->
-> Use `--setup`, not `--all` — `--all` asks for confirmation and dies with `EOFError` because
-> there's no keyboard attached.
+Note: these are **two different indexes**. `reindex_studio` does **not** make courses appear in
+the public catalog — you need `reindex_course` for that, and you need to re-run it after every
+course import.
 
-> The theme takes 30–60 seconds to show up. An unstyled page right after `settheme` is normal.
+Note: use `--setup`, not `--all` — `--all` asks for confirmation and dies with `EOFError`
+because there's no keyboard attached.
 
 ---
 
 ## Step 8 — Turn on the SQA features
 
-All feature switches ship **off**. Turn them on, seed the membership levels, then **restart**.
+Note: all feature switches ship **off**. Turn them on, seed the membership levels, then
+restart.
+
+### Step 8.1 - Write the seed script
 
 ```bash
 cat > /tmp/seed.py <<'EOF'
@@ -403,55 +470,65 @@ for slug, mode, name in [
 n = Switch.objects.filter(name__startswith='sqa_django_app.').update(active=True)
 print('switches enabled:', n)
 EOF
+```
 
-kubectl -n $NS cp /tmp/seed.py $(kubectl -n $NS get pod -l app.kubernetes.io/name=lms -o name | head -1 | cut -d/ -f2):/tmp/seed.py
+### Step 8.2 - Run the seed script
+
+```bash
 tutor k8s exec lms ./manage.py lms shell -c "$(cat /tmp/seed.py)"
+```
 
-# REQUIRED — see below
+Note: there are **8** switches, not 4. `update(active=True)` catches all of them, including
+`api_billing` — the one people miss, which makes the billing page 404 on its own.
+
+### Step 8.3 - Restart the LMS and CMS
+
+```bash
 kubectl -n $NS rollout restart deployment/lms deployment/cms
 ```
 
-> 🚨 **The restart is not optional.** The plugin builds its URL list **when the process starts**.
-> A switch that's off means the endpoint **doesn't exist** — you get `404`, not `403`. Flipping
-> the switch changes nothing until the LMS restarts and rebuilds its URLs.
->
-> There are **8** switches, not 4. `update(active=True)` above catches all of them, including
-> `api_billing` — the one people miss, which makes the billing page 404 on its own.
+Note: the restart is **not optional**. The plugin builds its URL list when the process starts,
+so a switch that's off means the endpoint doesn't exist — you get `404`, not `403`. Flipping
+the switch changes nothing until the LMS restarts and rebuilds its URLs.
 
 ---
 
 ## Step 9 — Workers (needed to import courses)
 
+### Step 9.1 - Scale the workers up
+
 ```bash
 kubectl -n $NS scale deploy/cms-worker deploy/lms-worker --replicas=1
 ```
 
-> 🚨 **Course import is a background job.** With no worker, a Studio import uploads fine and
-> then **hangs at "Unpacking" forever, with no error anywhere.** Same for export and reindex.
->
-> Workers cost about **2.3 GB each**. If memory is tight you can park them at `0` and scale
-> `cms-worker` back to `1` before importing. **`tutor k8s start` does not restore replicas you
-> scaled by hand** — it reports the deployment `unchanged` and leaves it at zero.
+Note: course import is a background job. With no worker, a Studio import uploads fine and then
+hangs at "Unpacking" forever, with no error anywhere. Same for export and reindex.
+
+Note: workers cost about **2.3 GB each**. If memory is tight you can park them at `0` and scale
+`cms-worker` back to `1` before importing. `tutor k8s start` does **not** restore replicas you
+scaled by hand — it reports the deployment `unchanged` and leaves it at zero.
 
 ---
 
-## Health checks
+## Step 10 — Health checks
 
-### The one that matters
+### Step 10.1 - The one that matters
 
 ```bash
 curl -s https://$LMS_HOST/heartbeat
 ```
+
+Expected:
 
 ```json
 {"modulestore": {"status": true, "message": "OK"},
  "sql":         {"status": true, "message": "OK"}}
 ```
 
-`modulestore` is MongoDB, `sql` is MySQL. **If this returns `200` with both `true`, the LMS,
-MySQL and MongoDB are all fine.** One request covers three services.
+Note: `modulestore` is MongoDB, `sql` is MySQL. If this returns `200` with both `true`, the
+LMS, MySQL and MongoDB are all fine. One request covers three services.
 
-### Public endpoints
+### Step 10.2 - Public endpoints
 
 ```bash
 curl -s -o /dev/null -w 'lms      %{http_code}\n' https://$LMS_HOST/heartbeat
@@ -472,7 +549,7 @@ curl -s -o /dev/null -w 'minio    %{http_code}\n' https://$FILES_HOST/minio/heal
 | `$FILES_HOST/minio/health/live` | **200** | MinIO |
 | `$FILES_HOST/` | **403** | ✅ **normal** — MinIO denies anonymous listing |
 
-### Inside the cluster
+### Step 10.3 - Inside the cluster
 
 ```bash
 kubectl -n $NS get pods                                            # all Running
@@ -483,16 +560,16 @@ kubectl -n $NS exec deploy/lms -- curl -s -o /dev/null -w '%{http_code}\n' http:
 curl -s -o /dev/null -w '%{http_code}\n' -H "Host: $LMS_HOST" http://127.0.0.1:$NODEPORT/     # 200 — the NodePort bridge
 ```
 
-`smtp` has no HTTP endpoint — "pod is Running" is the check.
+Note: `smtp` has no HTTP endpoint — "pod is Running" is the check.
 
-### Background jobs
+### Step 10.4 - Background jobs
 
 ```bash
 kubectl -n $NS get deploy | grep worker                                      # want 1/1
 kubectl -n $NS exec deploy/redis -- redis-cli LLEN edx.cms.core.default      # want 0
 ```
 
-A number that only goes **up** means no worker is consuming jobs.
+Note: a queue length that only goes **up** means no worker is consuming jobs.
 
 ---
 
@@ -511,7 +588,7 @@ A number that only goes **up** means no worker is consuming jobs.
 | `curl \| grep` can't find a course on `/courses` | that page is **JavaScript-rendered** | check in a browser — grep proves nothing here |
 | `tutor k8s reindex-courses` → not found | that command doesn't exist | use `./manage.py cms reindex_course` |
 | `reindex_course --all` → `EOFError` | it wants a keyboard | use `--setup` |
-| Pods `Pending` | box is out of memory | free memory; **stop**, don't force it |
+| Pods `Pending` | VPS is out of memory | free memory; **stop**, don't force it |
 | Everything mysteriously changed on the *other* instance | `TUTOR_ROOT` was unset | always export it; verify with `tutor config printvalue LMS_HOST` |
 
 ---
@@ -527,17 +604,17 @@ rm ~/.local/share/tutor-plugins/sqa_stripe_$INSTANCE.py
 sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ```
 
-Other instances on the box are untouched — that's the whole point of separate namespaces and
-roots.
+Note: other instances on the VPS are untouched — that's the whole point of separate namespaces
+and roots.
 
 ---
 
 ## What this deliberately doesn't do
 
-- **No image rebuild.** If you want different *branding baked in* (logos inside the MFEs), that
-  is a rebuild, ~73 min, and out of scope here.
-- **No CI/CD.** The pipeline knows about production and staging. A new instance is updated by
-  hand, and drifts from day one.
+- **No image rebuild.** Branding baked into the MFEs (logos inside the images) is a rebuild,
+  ~73 min, and out of scope here.
+- **No CI/CD.** The pipeline knows about production and staging only. A new instance is updated
+  by hand, and drifts from day one.
 - **No backups.** Set them up separately if the instance holds anything you care about.
 - **Nothing is copied from production** — no users, no courses, no secrets. Import courses as
   `.tar.gz` files if you want content. Courses travel; people don't.
