@@ -126,10 +126,13 @@ tutor dev exec lms python manage.py lms sqa_django_app_init
 # Turn on the feature flags the plugin gates behind waffle switches (persists in DB):
 tutor dev exec lms python manage.py lms shell -c "
 from waffle.models import Switch
-for n in ['sqa_django_app.api_membership','sqa_django_app.api_enrollment','sqa_django_app.gate_enrollment','sqa_django_app.auto_assign']:
-    Switch.objects.update_or_create(name=n, defaults={'active': True}); print(n,'ON')
+n = Switch.objects.filter(name__startswith='sqa_django_app.').update(active=True)
+print('switches enabled:', n)
 "
 ```
+Note: should print `switches enabled: 8`. Enabling by prefix rather than by name means new
+switches get picked up automatically as the plugin adds them.
+
 🚨 Waffle switches are read at **module import time** in `urls.py`, so after toggling one you must
 `tutor dev restart lms` for routes to register. More on switches in runbook 04.
 

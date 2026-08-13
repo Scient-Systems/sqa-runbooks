@@ -78,6 +78,8 @@ The switches and what they gate:
 | `sqa_django_app.auto_assign` | auto-assigning a level on registration |
 | `sqa_django_app.api_billing` | the Stripe billing endpoints (status/checkout/webhook) |
 | `sqa_django_app.api_proxy` | the AI-token broker endpoints |
+| `sqa_django_app.catalog_filter` | catalog visibility by account type × course mode |
+| `sqa_django_app.api_pathway` | the pathway endpoints and the completion signal |
 
 Flip them in the shell:
 ```bash

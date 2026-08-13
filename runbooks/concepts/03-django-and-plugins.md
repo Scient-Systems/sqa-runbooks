@@ -88,8 +88,8 @@ deliberate — the rank-comparison rule exists in exactly one place, so it canno
 And everything sits behind **waffle switches** — database-backed feature flags, all
 defaulting OFF, toggled in Django Admin. Concept: **shipping code and activating behavior
 are two separate decisions.** We can deploy gating code weeks before daring to turn it on,
-and kill it in 10 seconds without a deploy if it misbehaves. (The four switches:
-`api_membership`, `api_enrollment`, `gate_enrollment`, `auto_assign` — → runbook 06.)
+and kill it in 10 seconds without a deploy if it misbehaves. (Eight of them — the full list
+and what each one gates is in runbook 04.)
 
 Alternatives we didn't pick for gating: overriding LMS templates (cosmetic only — the API
 would still enroll you), or **openedx-filters** (intercept-and-block *before* the action;

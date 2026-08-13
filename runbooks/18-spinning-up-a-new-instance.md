@@ -469,8 +469,7 @@ tutor k8s exec lms ./manage.py lms shell -c "$(cat /tmp/seed.py)"
 ```
 
 Note: should print `switches enabled: 8`. Less than that means the switch rows weren't created
-yet — check the LMS started cleanly. The sweep is deliberate: hand-listing switches is how
-`api_billing` gets missed, and a missing switch 404s the billing page (see 8.3).
+yet — check the LMS started cleanly. The sweep is deliberate.
 
 ### Step 8.3 - Restart the LMS and CMS
 
