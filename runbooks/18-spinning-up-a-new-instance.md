@@ -417,9 +417,7 @@ tutor k8s exec cms ./manage.py cms reindex_studio --init    # Studio's own searc
 tutor k8s exec cms ./manage.py cms reindex_course --setup   # the PUBLIC /courses catalog
 ```
 
-Note: two separate indexes for two separate consumers — `reindex_studio` feeds Studio's
-authoring search, `reindex_course` feeds the public `/courses` catalog. Re-run `reindex_course`
-after every course import, or the new courses won't appear in the catalog.
+Note: two separate indexes for two separate consumers — `reindex_studio` feeds Studio's authoring search, `reindex_course` feeds the public `/courses` catalog. Re-run `reindex_course` after importing a course, or the new course won't appear in the catalog — especially after a command-line `manage.py cms import`, which doesn't reindex on its own.
 
 Note: use `--setup`, not `--all` — `--all` asks for confirmation and dies with `EOFError`
 because there's no keyboard attached.
@@ -470,8 +468,9 @@ EOF
 tutor k8s exec lms ./manage.py lms shell -c "$(cat /tmp/seed.py)"
 ```
 
-Note: there are **8** switches, not 4. `update(active=True)` catches all of them, including
-`api_billing` — the one people miss, which makes the billing page 404 on its own.
+Note: should print `switches enabled: 8`. Less than that means the switch rows weren't created
+yet — check the LMS started cleanly. The sweep is deliberate: hand-listing switches is how
+`api_billing` gets missed, and a missing switch 404s the billing page (see 8.3).
 
 ### Step 8.3 - Restart the LMS and CMS
 
