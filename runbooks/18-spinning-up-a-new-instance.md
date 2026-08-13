@@ -316,12 +316,6 @@ tutor config save \
   --set MFE_DOCKER_IMAGE=$IMG_MFE
 ```
 
-Note: it's **`MFE_DOCKER_IMAGE`**, not `DOCKER_IMAGE_MFE`. The second one doesn't exist — it
-fails with `Missing configuration value`. The two key names are not symmetrical.
-
-Note: set `MFE_HOST` explicitly even though it looks derivable — it's stored as a literal and
-won't re-derive later.
-
 Note: `ENABLE_WEB_PROXY=false` stops Tutor fighting host Caddy for ports 80/443, and
 `ENABLE_HTTPS=true` keeps generated links on `https://`.
 
@@ -339,8 +333,6 @@ a ~4 GB download.
 ```bash
 for k in LMS_HOST CMS_HOST MFE_HOST MINIO_HOST K8S_NAMESPACE ENABLE_WEB_PROXY; do printf '%-18s ' $k; tutor config printvalue $k; done
 ```
-
-Note: `MINIO_HOST` should have derived to `files.<your host>` on its own.
 
 ### Step 5.6 - Prove the secrets are different
 
@@ -377,8 +369,8 @@ kubectl -n $NS patch serviceaccount default \
   -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}'
 ```
 
-Note: no Tutor manifest mentions the pull secret. Attaching it to the namespace's default
-ServiceAccount is what makes every pod use it.
+Note: no Tutor manifest mentions the pull secret so we must attaching it ourselves to the namespace's default
+ServiceAccount, this is how the pods actually use it.
 
 ### Step 6.4 - Start the instance
 
@@ -393,7 +385,7 @@ kubectl -n $NS get pods -w        # Ctrl-C when everything is Running
 tutor k8s init
 ```
 
-Note: this is the ~18 minute one. ✅ It ends with `All services initialised.`
+Note: Takes a couple of minutes. It ends with `All services initialised.`
 
 Note: don't blind-retry a failed init. Look first with `kubectl -n $NS get jobs`, then
 `kubectl -n $NS logs job/<name> --tail=50`. A half-initialised database is worth deleting and
@@ -425,9 +417,9 @@ tutor k8s exec cms ./manage.py cms reindex_studio --init    # Studio's own searc
 tutor k8s exec cms ./manage.py cms reindex_course --setup   # the PUBLIC /courses catalog
 ```
 
-Note: these are **two different indexes**. `reindex_studio` does **not** make courses appear in
-the public catalog — you need `reindex_course` for that, and you need to re-run it after every
-course import.
+Note: two separate indexes for two separate consumers — `reindex_studio` feeds Studio's
+authoring search, `reindex_course` feeds the public `/courses` catalog. Re-run `reindex_course`
+after every course import, or the new courses won't appear in the catalog.
 
 Note: use `--setup`, not `--all` — `--all` asks for confirmation and dies with `EOFError`
 because there's no keyboard attached.
