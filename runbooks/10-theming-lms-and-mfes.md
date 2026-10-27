@@ -15,30 +15,50 @@ runbook 09.
 | Surface | URL | Styled by | Deploy cost |
 |---|---|---|---|
 | Marketing homepage | stemquestacademy.com | `~/sqa-homepage` (Next.js, standalone) | its own deploy (runbook 13) |
-| **Legacy LMS pages** (index, dashboard, course-about, wiki, certificates) | lms.stemquestacademy.com | comprehensive theme SCSS in `~/tutor-indigo` | **openedx image rebuild** |
-| **MFEs** (learning, learner-dashboard, profile, account, discussions, authn) | apps.…/* | brand package `~/brand-openedx` (2 layers — §3) | mfe image rebuild OR just LMS restart (runtime layer) |
-| Payment MFE | apps.…/sqa-payment | `~/frontend-app-sqa-payment` + brand runtime layer | mfe image rebuild |
+| **Legacy LMS pages** (certificates, policy pages, instructor dashboard, the problem iframe inside a unit) | lms.stemquestacademy.com | comprehensive theme SCSS in `~/tutor-indigo` | **openedx image rebuild** (CI) |
+| **MFEs** (catalog = homepage + course list + about, learning, learner-dashboard, profile, account, discussions, authn) | apps.lms.…/* | brand package `~/brand-openedx` (2 layers — §3) + widgets from `~/tutor-indigo` | runtime CSS: theme pin + config save; anything else: mfe image (CI) |
+| Payment MFE | apps.lms.…/sqa-payment | `~/frontend-app-sqa-payment` + brand runtime layer | mfe image rebuild (CI) |
+
+On Verawood the LMS homepage, `/courses` and course about pages **redirect to the Catalog MFE**,
+and `/dashboard` to the learner-dashboard MFE, so their old theme templates no longer reach anyone.
 
 Studio/CMS and the authoring MFE are deliberately left unthemed (tool-dense surfaces).
 
 The repos (all under github.com/Scient-Systems; the user commits/pushes, no AI attribution):
 | Clone | Branch | Notes |
 |---|---|---|
-| `~/tutor-indigo` | `release` | fork of overhangio/tutor-indigo. Deployed on VPS via editable pipx inject → `git pull` + `tutor config save` picks up changes. |
-| `~/brand-openedx` | `ulmo/indigo` | fork of edly-io/brand-openedx. `dist/` is **committed** (pushing publishes the runtime CSS). Repo must stay **public** (browsers fetch its CSS by URL). |
-| `~/frontend-app-sqa-payment` | `main` | mfe image pulls from GitHub `#main` — push before building. |
+| `~/tutor-indigo` | `verawood/indigo` | fork of overhangio/tutor-indigo, ported onto upstream v22. On the servers it is installed **editable** into the `tutor22` pipx venv from `~/tutor-indigo-verawood`, a checkout shared by every site on the box: `git checkout <commit>` there + `tutor22 config save` picks up changes. |
+| `~/brand-openedx` | `verawood/indigo` | fork of edly-io/brand-openedx. `dist/` (SQA) and `dist-scient/` (the demo's palette) are **committed** (pushing publishes the runtime CSS). Repo must stay **public** (browsers fetch its CSS by URL). |
+| `~/frontend-app-sqa-payment` | `main` | the build clones it at the commit `versions.yml` pins. |
 | `~/sqa-homepage` | `main` | standalone Next.js. |
 
-🚨 Local WSL has **pip-installed tutor-indigo 21.1.3**, NOT the fork. Local `tutor config save`
-reflects 21.1.3; only the VPS reflects the fork. **Theme changes can't be validated locally** — see
-runbook 09 gotcha #4.
+The old Ulmo branches (`release`, `ulmo/indigo`) are frozen; nothing deploys from them.
+
+🚨 Locally, `pip install tutor[full]` brings the **upstream** `tutor-indigo`, not the fork. A local
+`tutor config save` reflects upstream until you install your `verawood/indigo` clone editable
+(`pip install -e ~/tutor-indigo`). Otherwise validate theme changes on staging — see runbook 09
+gotcha #4.
+
+### Per-site looks without a rebuild
+
+Several sites share the same images; what differs is set in each site's Tutor config and read at
+runtime (keys from `tutor-indigo` `plugin.py`, set with `tutor22 config save --set …`):
+
+| Key | What it does | Who sets it |
+|---|---|---|
+| `INDIGO_BRAND_PROFILE` | swaps in a second palette and logo set (`dist-<profile>/`, `assets/<profile>/`) | demo: `scient` |
+| `INDIGO_BRAND_NAME`, `INDIGO_CATALOG_HEADLINE`, `INDIGO_WELCOME_MESSAGE` | names and headline copy | demo |
+| `INDIGO_FOOTER_NAV_LINKS` | footer links; `[]` = none | k-12 and demo: `[]`; default: Terms + Privacy |
+| `INDIGO_SHOW_MEMBERSHIP` | header Membership link, dashboard plan panel, plan redirect | k-12 and demo: `false` |
+| `INDIGO_SHOW_AI_TOKENS` | the AI token card on the profile | demo: `false` |
+| `PLATFORM_NAME` | site name everywhere (course tour, emails, titles) | all: their own |
 
 ## 2. Legacy LMS theme (`~/tutor-indigo`)
 
 A "comprehensive theme": Mako templates + SCSS that override stock LMS pages. They live in
 `tutorindigo/templates/indigo/lms/...`, are **Jinja-rendered by `tutor config save`** into
-`env/build/openedx/themes/indigo/`, then baked into the **openedx image** at
-`tutor images build openedx` (live in pod at `/openedx/themes/indigo/`).
+`env/build/openedx/themes/indigo/`, then baked into the **openedx image** by CI
+(live in pod at `/openedx/themes/indigo/`).
 
 - 🚨 Beware Jinja *inside* SCSS/HTML: `{{ INDIGO_PRIMARY_COLOR }}`, `{% if INDIGO_ENABLE_DARK_TOGGLE %}`.
 - SCSS entry points: `lms/static/sass/partials/lms/theme/_variables.scss` (palette + Google Fonts
@@ -61,10 +81,10 @@ A "comprehensive theme": Mako templates + SCSS that override stock LMS pages. Th
 
 ### Layer A — build-time `@edx/brand` (SCSS compiled into each MFE bundle)
 `tutor-indigo/plugin.py` emits `mfe-dockerfile-post-npm-install-<app>` patches:
-`RUN npm install '@edx/brand@github:Scient-Systems/brand-openedx#ulmo/indigo'` for learning,
-learner-dashboard, profile, account, discussions, authn, sqa-payment. This carries **everything that
-is NOT a CSS variable**: font `@import`s, header/footer/login chrome, `.btn-brand` styling, pill
-buttons. Changing it = `tutor images build mfe` + push + restart.
+`RUN npm install '@edx/brand@github:Scient-Systems/brand-openedx#verawood/indigo'` for the
+styled MFEs (catalog, learning, learner-dashboard, profile, account, discussions, authn,
+sqa-payment). This carries **everything that is NOT a CSS variable**: font `@import`s,
+header/footer/login chrome, `.btn-brand` styling, pill buttons. Changing it = a new mfe image (CI).
 
 Brand repo structure (`paragon/` dir): `core.scss` → `_variables`/`_fonts`/`_overrides`;
 `_overrides.scss` imports every page partial (`_header _footer _login _profile _dashboard …`) then
@@ -85,7 +105,10 @@ key (paragon core + our compiled `dist/core.min.css` as `brandOverride`) plus li
 🚨 **Never use `raw.githubusercontent.com` for these** — it serves `text/plain` +
 `X-Content-Type-Options: nosniff`, so browsers refuse to apply the stylesheet (silently; MFEs fall
 back to the baked-in CSS). jsDelivr serves proper `text/css`. SHA pinning is mandatory anyway — the
-branch name `ulmo/indigo` has a slash that jsDelivr's `@ref` can't parse.
+branch name `verawood/indigo` has a slash that jsDelivr's `@ref` can't parse.
+
+A site with `INDIGO_BRAND_PROFILE` set (the demo) loads `dist-<profile>/` instead of `dist/` from
+the same commit.
 
 Tokens: `paragon/tokens/src/themes/{light,dark}/**.json` → `npm ci && make build` regenerates
 `paragon/build/` + `dist/`. 🚨 No `@font-face`/`@import` survives into the variant CSS — fonts ship
@@ -98,45 +121,52 @@ components** (PricingPage/ManagePage/CheckoutPage). Inline styles beat styleshee
 
 ## 4. Deploy pipelines (pick by what changed)
 
+The normal path for every kind of theme change is the pipeline in runbook **17**: push to
+`verawood/indigo`, change the pins in `openedx-deploy` `versions.yml`, merge, and CI builds both
+images and deploys staging (which also moves the shared theme checkout). For brand CSS that means
+three steps: the brand commit, `BRAND_DIST_REF` in `tutor-indigo`, and both pins (17 §3).
+
+The one shortcut, for **runtime brand CSS only** (Layer B) on a single site, without a build:
+
 ```bash
-# A. Legacy LMS theme changed (tutor-indigo templates/sass):
-cd /home/edx/tutor-indigo && git pull && tutor config save
-tutor images build openedx && tutor images push openedx
-kubectl -n openedx rollout restart deployment/lms deployment/cms
-
-# B. Brand SCSS layer / sqa-payment changed → mfe image:
-cd /home/edx/tutor-indigo && git pull && tutor config save   # if plugin.py changed too
-tutor images build mfe && tutor images push mfe
-kubectl -n openedx rollout restart deployment/mfe deployment/lms
-
-# C. Brand TOKENS only (color.json etc.) — NO image rebuild:
-# local: make build → commit+push ulmo/indigo → bump BRAND_DIST_REF SHA in plugin.py → push tutor-indigo
-cd /home/edx/tutor-indigo && git pull && tutor config save
-tutor k8s start                                       # updates ConfigMaps (restart alone isn't enough on k8s)
-kubectl -n openedx rollout restart deployment/lms     # serves new MFE config; CSS cached ≤5min
+# brand pushed, BRAND_DIST_REF bumped and pushed in tutor-indigo → on the box:
+export PATH="$HOME/.local/bin:$PATH" TUTOR_ROOT=~/.local/share/<root> TUTOR_PLUGINS_ROOT=~/.local/share/<root>-plugins
+git -C ~/tutor-indigo-verawood fetch -q https://github.com/Scient-Systems/tutor-indigo.git verawood/indigo
+git -C ~/tutor-indigo-verawood checkout <tutor-indigo-commit>
+tutor22 config save && tutor22 k8s start     # updates ConfigMaps (a restart alone isn't enough on k8s)
 ```
-🚨 The `npm install @edx/brand@…#ulmo/indigo` line is a **cached Docker layer** — the branch ref
-never re-resolves on rebuild, so a 40-min `tutor images build mfe` can ship stale brand CSS. Bust it
-with `--no-cache` (or bump the install line) when Layer A must change. This is exactly why structural
-CSS moved to the runtime `brandOverride` (Layer B) where possible.
 
-Verify chain when "nothing changed": grep the change in (1) VPS clone → (2)
-`$(tutor config printroot)/env/...` → (3) `docker run --rm <image> grep …` → (4)
-`kubectl -n openedx exec deploy/lms -- grep …`. First failure = the broken hop.
+🚨 The checkout is **shared by every site on the box**: the neighbour picks up that theme commit
+the next time *its* config is saved. Afterwards record the new pins in `versions.yml`, or the next
+pipeline deploy moves the checkout back.
+
+🚨 The `npm install @edx/brand@…#verawood/indigo` line is a **cached Docker layer** — the branch ref
+never re-resolves on its own, so an mfe build can ship stale baked-in brand CSS. This is exactly why
+structural CSS lives in the runtime `brandOverride` (Layer B), which is pinned by SHA.
+
+Verify chain when "nothing changed": runbook **15**, "Universal 'nothing changed' recipe".
 
 ## 5. Redesign touchpoints (swap the design = edit exactly these)
 1. `~/sqa-homepage`: `app/globals.css` (tokens), `app/layout.tsx` (fonts), `app/page.tsx` + components.
 2. `~/tutor-indigo`: `_variables.scss` (palette + fonts + `$*-d` dark vars), `_extras.scss` head,
-   `extra/_header.scss`, `extra/_footer.scss`, `home/_home.scss`, `courseware/_discover.scss`,
-   `plugin.py` (`PRIMARY_COLOR`, `WELCOME_MESSAGE`), `components/AddDarkTheme.jsx` (iframe dark colors).
+   `extra/_header.scss`, `extra/_footer.scss`, `xblock/_xblock.scss` (problems inside units),
+   `plugin.py` (`PRIMARY_COLOR`, `WELCOME_MESSAGE`), `components/AddDarkTheme.jsx` (iframe dark
+   colors), `components/Sqa*.jsx` (catalog, dashboard, header, course-complete widgets).
 3. `~/brand-openedx`: `paragon/tokens/src/themes/{light,dark}/*.json`, `_fonts.scss`, `_overrides.scss`,
-   `_header/_footer/_login/_profile/_dashboard.scss` → then `make build` and **commit `dist/` too**.
+   `_header/_footer/_login/_profile/_dashboard/_catalog/_course-exit/_phone.scss`, `palettes/`
+   (the demo's second palette) → then `make build` and **commit `dist/` and `dist-scient/` too**.
 4. `~/frontend-app-sqa-payment`: `src/index.scss` + the inline-styled pages.
 
 ## 6. The logo constraint
 `logo.png` = colorful bubble letters on navy. Looks great on dark chrome, poor on white. Both footers
 display it — 🚨 **never `filter: invert()` the footer logo**. LMS serves it at
 `/theming/asset/images/logo.png`.
+
+The MFE headers are a navy band in both themes; the header logo is **48px** tall on desktop and
+36px on phones (`_header.scss`, `_phone.scss`). The learning MFE's own CSS sets
+`#root header .logo img { height: 100% }`, which is why `_header.scss` pins the course header's
+logo explicitly. Change the size in one place and check it on the dashboard and a course page, in
+both themes.
 
 ---
 

@@ -220,8 +220,16 @@ Add to the image requirements so it's baked in:
 ```bash
 echo "-e /openedx/sqa_django_app" >> "$(tutor config printroot)/env/build/openedx/requirements/private.txt"
 ```
-🚨 For **production** the install path is different — `private.txt` is unreliable on Tutor v21; use
-`OPENEDX_EXTRA_PIP_REQUIREMENTS` (pip from GitHub). See runbook 12.
+🚨 For the **servers** the install path is different, and you don't run it: CI installs the plugin
+with `OPENEDX_EXTRA_PIP_REQUIREMENTS` (pip from GitHub at the commit pinned in `openedx-deploy`
+`versions.yml`) and checks the installed commit before publishing the image. Ship plugin changes
+by pushing `main`; the pin PR opens itself (runbooks 12, 17).
+
+🚨 **Verawood gotcha — courses with only an SQA audience mode.** Open edX's stock Enroll button
+calls `CourseMode.can_auto_enroll()`, which on Verawood only says yes for `audit`/`honor`. Our
+`catalog.patch_auto_enroll_mode()` patches both `auto_enroll_mode` and `can_auto_enroll` so an
+audience-only course (e.g. mode `sqa-students`) can be enrolled. If you touch enrollment, keep
+both patches and their tests in `tests/test_catalog.py`.
 
 ## 8. Worked example — add a new endpoint end to end
 

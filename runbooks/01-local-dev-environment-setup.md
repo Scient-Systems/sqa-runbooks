@@ -55,10 +55,10 @@ sudo apt install -y python3-pip python3-venv git make
 ## 4. Install Tutor (inside WSL)
 
 ```bash
-pip install --user "tutor[full]"
+pip install --user "tutor[full]==22.0.2"
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
-tutor --version          # should print 21.x
+tutor --version          # should print 22.0.2 (Verawood), the version the servers run
 ```
 
 > 🚨 Tutor lives in `~/.local/bin`. If you ever run Tutor from a *non-login* shell
@@ -75,8 +75,16 @@ git clone https://github.com/Scient-Systems/tutor-indigo.git
 git clone https://github.com/Scient-Systems/brand-openedx.git
 git clone https://github.com/Scient-Systems/sqa-homepage.git
 git clone https://github.com/Scient-Systems/sqa-proxytoken-service.git
+git clone https://github.com/Scient-Systems/openedx-deploy.git
 # course content lives in ~/silly_bot_course_project
+
+# the two theme repos are NOT on their GitHub default branch:
+git -C tutor-indigo  checkout verawood/indigo
+git -C brand-openedx checkout verawood/indigo
 ```
+
+> 🚨 On the servers Tutor is installed as **`tutor22`** and plain `tutor` must never be
+> installed (runbook 12). On your laptop `tutor` is fine: it only ever talks to your own Docker.
 
 > 🚨 **Never** clone under `/mnt/c/...`. Confirm with `ls ~/sqa_django_app/SQA_PLUGIN_CONTEXT.md`.
 > Several repos are **private** — you'll need a GitHub Personal Access Token (PAT) with `repo`

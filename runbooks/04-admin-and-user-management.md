@@ -1,8 +1,13 @@
 # 04 — Admin mode & user management
 
 Covers: the Django admin site, superusers, staff/instructor roles, and **waffle switches** (the
-feature flags our plugin lives behind). Commands shown for `tutor dev`; for production swap
-`tutor dev exec lms` → `tutor k8s exec lms --`.
+feature flags our plugin lives behind). Commands shown for `tutor dev`; on a server swap
+`tutor dev exec lms` → `kubectl -n <namespace> exec -i deploy/lms --` (namespaces: runbook 12).
+
+> 🚨 Never delete a user with `User.delete()` alone on a server: Studio-only tables
+> (`course_creators_coursecreator` and others) hold foreign keys to `auth_user` and make the
+> delete fail. Clear the rows that reference the user first (find them through
+> `information_schema` foreign keys to `auth_user`), and take a backup of what you delete.
 
 ---
 
@@ -79,7 +84,22 @@ The switches and what they gate:
 | `sqa_django_app.api_billing` | the Stripe billing endpoints (status/checkout/webhook) |
 | `sqa_django_app.api_proxy` | the AI-token broker endpoints |
 | `sqa_django_app.catalog_filter` | catalog visibility by account type × course mode |
-| `sqa_django_app.api_pathway` | the pathway endpoints and the completion signal |
+| `sqa_django_app.api_pathway` | the pathway endpoints and the completion signal (and the header's Pathways link, which only shows when the API answers) |
+
+What each site runs today (checked 2026-10-27):
+
+| Switch | Production | Staging | k-12 |
+|---|---|---|---|
+| `api_membership`, `api_billing` | on | on | on |
+| `api_enrollment`, `gate_enrollment`, `auto_assign`, `api_proxy`, `catalog_filter` | on | on | **off** |
+| `api_pathway` | **off** | **off** | **off** |
+
+Also on everywhere: the waffle **flag** `courseware.microfrontend_course_exit_page` (everyone),
+which sends the last unit's Next button to our course-complete page.
+
+Check a site with
+`kubectl -n <ns> exec -i deploy/lms -- ./manage.py lms shell` and
+`Switch.objects.filter(name__startswith="sqa_django_app.")`.
 
 Flip them in the shell:
 ```bash
@@ -95,7 +115,7 @@ for n in ['sqa_django_app.api_membership','sqa_django_app.api_billing']:
 1. **Switches are evaluated at module import time** (in `urls.py`). Toggling one in the DB does
    nothing until the LMS process restarts:
    - dev: `tutor dev restart lms`
-   - k8s: `kubectl -n openedx rollout restart deployment/lms`
+   - k8s: `kubectl -n <namespace> rollout restart deployment/lms deployment/lms-worker`
 2. **`gate_enrollment` is disruptive when turned on.** Once on, the openedx-filters step **blocks
    any enrollment** (new enrollment or re-enrollment, from any source — dashboard, admin, bulk import,
    our API) by a user below the course's required level, and the CMS publish-sync starts writing

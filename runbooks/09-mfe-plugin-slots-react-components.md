@@ -99,33 +99,34 @@ installed in the MFE image.
 
 ## 4. Finding the right slot ID
 
-Slot IDs differ per MFE and per release. **Verify against the deployed release branch
-(`release/ulmo.3`)** — don't assume. Source: `github.com/openedx/frontend-app-<name>` at that branch,
-in `src/plugin-slots/*/index.jsx` (the `id` prop on each `PluginSlot`). Or the
+Slot IDs differ per MFE and per release. **Verify against the deployed Verawood release branch
+(`release/verawood.*`)** — don't assume. Source: `github.com/openedx/frontend-app-<name>` at that
+branch, in `src/plugin-slots/*/index.jsx` (the `id` prop on each `PluginSlot`). Or the
 docs.openedx.org "frontend plugin slots" reference.
 
-Slots we've used:
+Slots we use (all wired in `tutor-indigo` `plugin.py`):
 | MFE | Slot ID | Renders |
 |---|---|---|
-| profile | `org.openedx.frontend.profile.additional_profile_fields.v1` | left column of profile form |
-| learner-dashboard | `org.openedx.frontend.learner_dashboard.course_list.v1` | above the course list |
-| learner-dashboard | `org.openedx.frontend.learner_dashboard.widget_sidebar.v1` | right sidebar card |
+| profile | `org.openedx.frontend.profile.additional_profile_fields.v1` | left column of profile form (SqaTokenCard) |
+| learner-dashboard | `org.openedx.frontend.learner_dashboard.course_list.v1` | above the course list (SqaDashboardHero) |
+| learner-dashboard | `org.openedx.frontend.learner_dashboard.widget_sidebar.v1` | right sidebar card (SqaMembershipInstrument, SqaPlanRedirect) |
 | learner-dashboard | `org.openedx.frontend.learner_dashboard.no_courses_view.v1` | empty state |
-| (all) | `org.openedx.frontend.layout.header_desktop_main_menu.v1` | desktop top nav |
+| learning | `learning_help_slot` | course header, right side (SqaExitCourse, theme toggle) |
+| learning | `org.openedx.frontend.learning.course_exit_view_courses.v1` | course-complete page (SqaCourseComplete; needs the `courseware.microfrontend_course_exit_page` flag) |
+| catalog | `org.openedx.frontend.catalog.home_page.*`, `.course_catalog_page.*`, `.course_about_page.*` | homepage, course list, about page (SqaCatalog, SqaCourseAboutEnroll) |
+| (all styled) | `org.openedx.frontend.layout.header_desktop_main_menu.v1` (+ `header_mobile_main_menu.v1`) | top nav (SqaHeaderNav) |
 | (all) | `org.openedx.frontend.layout.footer.v1` | footer — already filled by indigo_footer; avoid (dedupe, §6) |
 
 ## 5. Deploy (component/slot change = MFE image rebuild)
 
-There is no runtime shortcut for components (unlike brand token CSS). The VPS runs `tutor-indigo` as
-an **editable pipx inject**, so `git pull` + `tutor config save` picks up fork changes — no reinstall.
-```bash
-# user commits + pushes tutor-indigo first
-cd /home/edx/tutor-indigo && git pull
-tutor config save           # regenerates env.config.jsx from patches + plugin.py
-tutor images build mfe      # LONG — don't cancel midway
-tutor images push mfe
-kubectl -n openedx rollout restart deployment/mfe   # (+ imagePullPolicy patch, runbook 12)
-```
+There is no runtime shortcut for components (unlike brand CSS). Push to `tutor-indigo`
+`verawood/indigo`, then go through the pipeline (runbook **17**): set the `tutor-indigo` ref in
+`openedx-deploy` `versions.yml`, merge to `main`. CI regenerates `env.config.jsx`, builds the mfe
+image, and staging deploys itself.
+
+To check your wiring before that, render it locally with your fork installed editable
+(`pip install -e ~/tutor-indigo`, then `tutor config save`) and read
+`$(tutor config printroot)/env/plugins/mfe/build/mfe/env.config.jsx`.
 
 ## 6. Gotchas (every one has bitten us — 2026-06-12 and 2026-06-25)
 
@@ -136,26 +137,31 @@ kubectl -n openedx rollout restart deployment/mfe   # (+ imagePullPolicy patch, 
    references; step 2 defines.
 3. **Wrong patch file = also `ReferenceError`.** `buildtime-imports` is for ES imports only;
    definitions go in `runtime-definitions`.
-4. **Local `tutor config save` does NOT validate the fork.** Local WSL runs the pip-installed
-   `tutor-indigo` 21.1.3, not your fork — a local save won't reflect or error on fork changes. Real
-   validation happens on the VPS. Before pushing: mentally verify the 3 wiring points + scan the
-   `.jsx` for `{{`. Don't "test by deploying to prod."
+4. **Local `tutor config save` does NOT validate the fork — unless you install it.** `tutor[full]`
+   brings the upstream `tutor-indigo`, not your fork, so a local save won't reflect or error on fork
+   changes. Install your clone editable (`pip install -e ~/tutor-indigo`) to render it locally;
+   otherwise real validation happens on staging. Before pushing: verify the 3 wiring points + scan
+   the `.jsx` for `{{`. Don't "test by deploying to prod."
 5. **One bad `.jsx` breaks ALL MFEs' builds** (raw concatenation). Keep components small and tidy.
 6. **Footer slot has dedupe logic** — `mfe-env-config-runtime-final` drops `indigo_footer` if >2
    inserts land in the footer slot. Prefer any other slot.
-7. **New files under `tutorindigo/` must be `git add`-ed** — the VPS builds from the committed tree;
+7. **New files under `tutorindigo/` must be `git add`-ed** — CI builds from the committed tree;
    an untracked file once broke the image build.
+8. **Read config at render time, not module load.** Per-site switches like
+   `getConfig().INDIGO_SHOW_MEMBERSHIP` come from the MFE config the LMS serves, so read them inside
+   the component. That is what lets one image serve several sites.
 
 ## 7. Pre-push checklist
 - [ ] `components/MyWidget.jsx`: no `export`, no `import`, no `{{`/`}}` anywhere
 - [ ] every identifier used is in `Imports.jsx` (added there if new — no new npm deps)
 - [ ] `{{- patch("MyWidget.jsx") }}` added to **`mfe-env-config-runtime-definitions`**
 - [ ] `PLUGIN_SLOTS.add_item((mfe, slot_id, "...RenderWidget: MyWidget"))` in `plugin.py`
-- [ ] slot ID verified against the `release/ulmo.3` MFE source
+- [ ] slot ID verified against the Verawood (`release/verawood.*`) MFE source
 - [ ] new files `git add`-ed
-- [ ] after deploy, verify in the pod:
-      `kubectl -n openedx exec deploy/mfe -- sh -c 'find / -name "env.config.js*" 2>/dev/null'`
-      then grep that file for `const MyWidget` — present = wired correctly.
+- [ ] after the staging deploy, check the served bundle has it:
+      `curl -s https://apps.staging.stemquestacademy.com/<mfe>/ | grep -o 'app\.[a-z0-9]*\.js'`
+      then `curl -s https://apps.staging.stemquestacademy.com/<mfe>/<that file> | grep -c my_widget`
+      (the widget's `id` string — component names get minified away) — non-zero = wired correctly.
 
 ---
 

@@ -57,7 +57,7 @@ runbook has the full context.
 | Every MFE build breaks | one bad `.jsx` (raw concatenation) | fix/shrink the component (09) |
 | Footer widget vanishes | footer slot dedupe drops `indigo_footer` if >2 inserts | use a different slot (09) |
 | VPS build fails: file not found | new `tutorindigo/` file not `git add`-ed | commit it; VPS builds the committed tree (09, 10) |
-| Local `tutor config save` doesn't show fork change | local runs pip indigo 21.1.3, not the fork | validate on the VPS (09, 11) |
+| Local `tutor config save` doesn't show fork change | local runs the pip `tutor-indigo`, not the fork | install the fork editable (`pip install -e` on your `verawood/indigo` clone) or check on staging (09, 11) |
 | `tutor dev restart learner-dashboard` → no such service | it's a bundle inside `mfe` | restart `mfe` (08, 12) |
 | MFE page blank, header only, no JS error | wrong Router basename (`PUBLIC_PATH` unset) | `wrapWithRouter={false}` + own `<BrowserRouter basename>`; set `PUBLIC_PATH` (08) |
 | MFE page fully blank, console: "X required by Studio Footer" | `@edx/frontend-component-footer` `ensureConfig` fails in prod | remove that footer or set the 4 footer config keys (08) |
@@ -68,25 +68,39 @@ runbook has the full context.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Brand CSS never applies | `raw.githubusercontent.com` serves `text/plain` + nosniff | use jsDelivr pinned to a commit SHA (10) |
-| jsDelivr `@ulmo/indigo` 404 | branch name has a slash | pin to a commit SHA, not the branch (10) |
+| jsDelivr `@verawood/indigo` 404 | branch name has a slash | pin to a commit SHA, not the branch (10) |
+| Brand change built and deployed, site shows old CSS | `BRAND_DIST_REF` in `tutor-indigo` not bumped | bump it, pin that `tutor-indigo` commit too (17 §3) |
 | Responsive brand rules dead in prod | `--pgn-size-breakpoint-*` custom media ships raw, browsers drop it | use plain px queries (768px = md) (10) |
-| 40-min mfe rebuild ships stale brand CSS | `npm install @edx/brand@…#branch` is a cached layer | `--no-cache` / bump the line; prefer runtime `brandOverride` (10) |
-| Token CSS change "not deploying" on k8s | restart alone doesn't refresh ConfigMaps | `tutor k8s start` then `rollout restart deployment/lms` (10) |
-| `INDIGO_WELCOME_MESSAGE` default ignored | `config.yml` override beats plugin default | `tutor config printvalue INDIGO_WELCOME_MESSAGE` (10, 11) |
+| A brand rule wins in light mode but not dark (or the reverse) | `_dark.scss` re-imports most partials under `[data-paragon-theme-variant=dark]`, raising their specificity | check both themes; put phone-only rules in a media query so the dark copy cannot override `_phone.scss` (10) |
+| Token CSS change "not deploying" on k8s | restart alone doesn't refresh ConfigMaps | `tutor22 k8s start` then `rollout restart deployment/lms` (10) |
+| `INDIGO_WELCOME_MESSAGE` default ignored | `config.yml` override beats plugin default | `tutor22 config printvalue INDIGO_WELCOME_MESSAGE` (10, 11) |
 | Footer logo looks wrong inverted | someone applied `filter: invert()` | never invert the footer logo (10) |
+| Course content unreadable in dark mode (pale box, white text) | course HTML hard-codes a light `background:` but not a text colour | use a translucent tint (`rgba(…, 0.12)`) and let text inherit; don't hard-code text colours either (05) |
+| Settings render with the wrong brand CSS / old footer | the shared `~/tutor-indigo-verawood` checkout is at a different commit than the images | check out the commit pinned for the running tag, `config save`, `k8s start` (12) |
 
 ## Deploy / k8s
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Rollout runs OLD code after push | `imagePullPolicy: IfNotPresent` + same tag | patch `imagePullPolicy: Always`, then rollout restart (12) |
-| `tutor images push mfe` rejected | `MFE_DOCKER_IMAGE` points at overhangio default | set it to your GHCR before first build (12) |
-| Build fast but new code missing | Docker cached the `pip …@main` layer | pin the commit SHA, or `--no-cache` (12) |
-| Pod CrashLoopBackOff, `No module named pkg_resources` | ran `pip install --force-reinstall` in a live pod | 🚨 never do that; `tutor images build openedx --no-cache` (12) |
+| 🚨 Meilisearch crash-loops, MySQL/Mongo/Caddy downgraded, LMS loses its secrets | plain `tutor` (Tutor 21) was run against a Verawood root | never install or run it on the servers; only `tutor22` with `TUTOR_ROOT` set; restore from the env's backup (12) |
+| Command changed the *other* site on the box | `TUTOR_ROOT` (or `TUTOR_PLUGINS_ROOT`) unset or wrong | export both; check `tutor22 config printvalue LMS_HOST` first (12, 18) |
+| 🚨 VPS 1 stops answering SSH, production and demo down | memory exhausted, e.g. overlapping Studio shells or publish loops | restart the VPS from the hosting panel; afterwards, one shell, save only, `free -h` first (12, 17) |
+| Pods `ImagePullBackOff`, `403` from ghcr.io | the `ghcr-pull` token was revoked | new token into `ghcr-pull` in every namespace on the box, delete stuck pods (12) |
+| Image build: `could not read Username for 'https://github.com'` | `MFE_CLONE_TOKEN` revoked, or written without `x-access-token:` | new token via `gh secret set MFE_CLONE_TOKEN`; keep the `x-access-token:<token>` URL form (12, 17) |
+| MFE build fails `npm` `ECONNRESET` | the npm registry cut a download | re-run the failed job (17) |
+| `deploy.sh` aborts: memory | less than 3 GB `MemAvailable` | free memory first; don't lower the guard on VPS 1 (12) |
+| `deploy.sh` aborts: "service change" | something other than the two app images would change | find out why before `ALLOW_SERVICE_CHANGE=1` (12) |
+| `tutor22 k8s init` hangs on MinIO | `minio/mc` image gone from Docker Hub | `tutor22 k8s do init --limit=<service>` for the others (18) |
+| Enroll button does nothing, `POST /change_enrollment` returns empty 200 | course has only an SQA audience mode; Verawood's `can_auto_enroll` wants audit/honor | fixed in `sqa_django_app` `037e1d0` (patches `can_auto_enroll` too); check that build is running (06) |
+| Pod CrashLoopBackOff, `No module named pkg_resources` | ran `pip install --force-reinstall` in a live pod | 🚨 never do that; ship a new image through CI (12) |
 | `migrate` says "nothing" but table missing | a prior run fake-applied it | `migrate <app> <prev> --fake` then `migrate` real (12) |
-| Plugin "not found" in pod after deploy | image cached old / build didn't include it | verify in image with `docker run … pip show`; check the Always patch (12) |
 | Setting from a Tutor patch ignored in prod | `plugin_settings()` overwrites with `os.environ.get` | use a k8s Secret env var, not a patch, for those (04, 12, 13) |
 | Dev setting "works", prod doesn't | dev and prod are different patches | add the `…-production-settings` twin (02, 07) |
+| `pkill -f …` over ssh killed your own session | the pattern was in your own command line | find the PID and kill that |
+
+Superseded by the CI pipeline (kept for anyone reading old notes): *rollout runs old code after a
+same-tag push* (tags are now a manifest hash, never reused), *`tutor images push mfe` rejected*
+and *`pip …@main` layer cached* (no server builds images; CI pins the plugin by SHA).
 
 ## Stripe
 
@@ -110,9 +124,10 @@ runbook has the full context.
 ## Universal "nothing changed" debugging recipe
 
 Grep your change down the chain; the first miss is the broken hop:
-1. VPS clone (the source file)
-2. `$(tutor config printroot)/env/...` (after `tutor config save`)
-3. `docker run --rm <image> grep …` (after build)
-4. `kubectl -n openedx exec deploy/<svc> -- grep …` (after push + rollout + the Always patch)
+1. The commit pinned in `openedx-deploy` `versions.yml` (is your change in it, on the Verawood branch?)
+2. The build summary for that tag (did CI build it, which images?)
+3. `$TUTOR_ROOT/env/...` on the box (after `tutor22 config save`) — and the shared
+   `~/tutor-indigo-verawood` checkout for theme changes
+4. `kubectl -n <ns> exec deploy/<svc> -- grep …` (after the deploy; check the pod's image tag first)
 
 ## "Which pipeline do I need?" — see runbook 00 §4 and the per-area runbooks.

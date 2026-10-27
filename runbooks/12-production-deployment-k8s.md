@@ -1,64 +1,125 @@
-# 12 — Production deployment (Tutor k8s)
+# 12 — Production deployment (Tutor 22 on k8s)
 
-How code reaches production. Our VPS runs **Tutor k8s** (Kubernetes) on Tutor v21. Two custom images
-(`openedx` and `mfe`) live on **GHCR**. This runbook is the canonical build → push → roll-out
-procedure plus every deploy gotcha we've hit.
+How code reaches the servers. Every site runs **Open edX Verawood on Tutor 22** (`tutor22`)
+on Kubernetes (k3s). Two custom images, `openedx` and `mfe`, live on **GHCR** and are built
+by CI in [`openedx-deploy`](https://github.com/Scient-Systems/openedx-deploy). This runbook is
+the reference for the environments, the deploy script, secrets and the gotchas. For the
+day-to-day flow (push → pin → build → staging → production) read **17** first.
 
-Production hosts: LMS `lms.stemquestacademy.com`, MFEs `apps.lms.stemquestacademy.com`.
-Images: `ghcr.io/scient-systems/openedx-indigo`, `ghcr.io/scient-systems/openedx-mfe:21.0.0-indigo`.
-
-> 🚨 Before any prod deploy: DB backup + a version tag. Deploys are hard to reverse.
-
----
-
-## 0. ⚠️ CI now builds the images — this runbook is the fallback path
-
-As of **2026-08-05**, images are built by GitHub Actions in
-[`openedx-deploy`](https://github.com/Scient-Systems/openedx-deploy)
-(`.github/workflows/build-images.yml`), driven by `versions.yml`, which pins every input:
-Tutor, the plugin versions, and the four source repos that feed the images.
-
-**Building on a server is now the exception, not the procedure.** It is justified only when CI
-itself is down, and must be followed by a real CI build so the registry and the manifest agree.
-
-Two gotchas below are **superseded** by that pipeline and are kept only for the fallback path:
-
-| Superseded | Why it no longer applies |
-|---|---|
-| §2b "Bust the Docker cache when only `@main` changed" | CI pins the plugin by **commit SHA**, so the layer's cache key changes exactly when the code does. No `--no-cache`, no manual `git ls-remote`. |
-| §4 "The `imagePullPolicy` trap" | CI tags images by `sha256(versions.yml)`, so a changed manifest is **always a new tag**. There is no cached image under that name for k8s to serve. |
-
-Both were mitigations that depended on someone remembering. The pipeline removes the failure
-mode instead of documenting it.
-
-CI also **verifies before pushing**: the openedx image must contain the plugin, import it, and
-its installed commit must equal the SHA `versions.yml` pins; the mfe image must contain the
-compiled payment app. A build fails rather than publishing an image that is missing or stale.
-
-Measured cold builds: **openedx 18m48s**, **mfe 73m32s**.
+> 🚨 Before any production deploy: a backup and a known previous tag. The production workflow
+> takes the backup for you; doing it by hand, take it yourself.
 
 ---
 
-## 1. One-time setup
+## 0. The four sites
 
-### 1a. Install the Django plugin into the openedx image (Tutor v21 way)
-🚨 Tutor v21 does **not** use `private.txt` for prod — it silently does nothing. Use
-`OPENEDX_EXTRA_PIP_REQUIREMENTS`. The repo is **private**, so embed a PAT (scopes: `repo`,
-`read:packages`) in the pip URL — Docker build has no git credentials:
+| Site | LMS / MFE host | Box | Tutor root (`~/.local/share/…`) | Namespace | Deployed by |
+|---|---|---|---|---|---|
+| Production | `lms.stemquestacademy.com` / `apps.lms.…` | VPS 1 | `tutor-prod-verawood` | `openedx` | "Deploy production" workflow |
+| Demo | `training-demo.stemquestacademy.com` / `apps.training-demo.…` | VPS 1 | `tutor-demo-verawood` | `openedx-demo` | by hand |
+| Staging | `staging.stemquestacademy.com` / `apps.staging.…` | VPS 2 | `tutor-staging-verawood` | `openedx` | automatic after every build |
+| k-12 | `k-12.stemquestacademy.com` / `apps.k-12.…` | VPS 2 | `tutor-verawood` | `openedx-verawood` | by hand |
+
+Studio is `studio.stemquestacademy.com` on production (a *sibling* of `lms.`) and
+`studio.<lms-host>` everywhere else.
+
+Every root has its own plugins folder next to it (`<root>-plugins`). Every command on a box
+needs both set:
+
 ```bash
-tutor config save --set "OPENEDX_EXTRA_PIP_REQUIREMENTS=['git+https://<PAT>@github.com/Scient-Systems/sqa_django_app.git@main']"
+export PATH="$HOME/.local/bin:$PATH"
+export TUTOR_ROOT=$HOME/.local/share/tutor-prod-verawood
+export TUTOR_PLUGINS_ROOT=$TUTOR_ROOT-plugins
+tutor22 config printvalue LMS_HOST        # ✅ always check you are where you think you are
 ```
-🚨 The PAT ends up in the image's pip cache layer → **the registry must stay private** (GHCR private).
 
-### 1b. Point images at your own registry (before the first build)
+> 🚨 **Only `tutor22`.** Plain `tutor` (Tutor 21, Ulmo) is uninstalled on both boxes and must
+> stay that way. On 2026-10-26 one run of it against staging re-applied Ulmo manifests:
+> Meilisearch went back to v1.8.4 and crash-looped on the newer data, MySQL, MongoDB and Caddy
+> were downgraded, and the LMS lost its secret references. The Ulmo roots are archived in
+> `~/archive/ulmo-20261027/` on each box.
+
+> 🚨 **VPS 1 runs production and the demo together**, with about 8 GB of memory free at rest.
+> Anything heavy you run there (a Studio shell, a reindex, a course import or publish loop) is
+> production-risk. Check `free -h` first. On 2026-10-22 two overlapping Studio publish loops on
+> the demo froze the whole box, production included, until it was restarted from the hosting
+> panel.
+
+The theme plugin is loaded from **`~/tutor-indigo-verawood`**, one checkout shared by every
+root on a box. `config save` renders settings from it (the brand CSS link among them), so it
+must sit at the `tutor-indigo` commit pinned for the images you run. Fetch by URL:
+`git -C ~/tutor-indigo-verawood fetch https://github.com/Scient-Systems/tutor-indigo.git verawood/indigo`.
+
+---
+
+## 1. How images are built
+
+CI builds both images from `versions.yml` on every push to `openedx-deploy` `main` that touches
+it (`.github/workflows/build-images.yml`):
+
+- **Tag** = the first 12 characters of `sha256(versions.yml)`, shared by both images
+  (`ghcr.io/scient-systems/openedx:<tag>`, `ghcr.io/scient-systems/openedx-mfe:<tag>`). Any
+  change to the manifest is a new tag, so Kubernetes can never serve a stale image under an old
+  name, and `imagePullPolicy` stops mattering.
+- **Verified before publishing:** the openedx image must contain `sqa_django_app` at exactly the
+  pinned commit; the mfe image must contain the compiled payment app. Otherwise nothing is
+  pushed.
+- **Time:** ~7 minutes when the previous tag's cache is warm; a cold MFE build is up to ~1 hour.
+- **Private sources** (`sqa_django_app`, `frontend-app-sqa-payment`) are fetched with the
+  `MFE_CLONE_TOKEN` secret, written as `x-access-token:<token>` in the URL. GitHub redirects the
+  fetch, and the git inside the image drops a bare token on the redirect.
+
+> 🚨 **No server ever builds an image.** If CI is down, fix CI. A server build leaves the
+> registry and the manifest disagreeing about what is running.
+
+Manual run (any branch): `gh workflow run build-images.yml -R Scient-Systems/openedx-deploy
+--ref main -f image=both -f push=true`. If the MFE job fails on `npm` `ECONNRESET`, re-run just
+that job.
+
+---
+
+## 2. How a deploy runs: `scripts/deploy.sh`
+
+Staging (automatic) and production (workflow) both copy `scripts/deploy.sh` to the box and run:
+
 ```bash
-tutor config save --set "DOCKER_IMAGE_OPENEDX=ghcr.io/scient-systems/openedx"   # indigo appends -indigo
-tutor config save --set "MFE_DOCKER_IMAGE=ghcr.io/scient-systems/openedx-mfe:21.0.0-indigo"
+bash /tmp/deploy.sh <staging|prod> <tag> [tutor-indigo-commit]
 ```
-🚨 If you skip this, `tutor images push mfe` is rejected because the default points at
-`docker.io/overhangio/...` which you can't push to. (Bug 5 in PROD_DEPLOYMENT.)
 
-### 1c. Production secrets → k8s Secrets (NOT plugin files, NOT git, NOT images)
+What it does, in order:
+
+1. Uses `tutor22` with that environment's root and plugins folder — never anything else
+2. Refuses to start with less than **3 GB** `MemAvailable` (`MIN_MEM_GB` to change)
+3. Backs up the environment's `config.yml`
+4. Fetches `tutor-indigo` by URL and checks out the pinned commit in the shared checkout
+5. Saves the config with the two new image tags and renders
+6. **Refuses to apply** if anything other than the two app images would change
+   (`ALLOW_SERVICE_CHANGE=1` overrides, deliberately)
+7. `k8s start`, waits for the rollouts, runs migrations via `kubectl exec`
+8. Prints the previous tag and theme commit — **rollback is the same command with those**
+
+It is a **code** deploy only. It decrypts nothing and never rewrites environment config
+(hostnames, secrets, per-site settings): that lives on the box in the Tutor root.
+
+The production workflow adds, before `deploy.sh`: a check that staging already runs that exact
+tag, and a full backup copied off the box. There is **no second-person approval** — GitHub's
+required reviewers need a paid plan on a private repo — so a human typing the tag is the gate.
+
+### k-12 and the demo
+
+Not in the pipeline. Roll them forward by hand with the tag staging runs: back up (MySQL dump,
+Mongo dump, `config.yml`, plugins), check out the matching theme commit, `tutor22 config save
+--set DOCKER_IMAGE_OPENEDX=… --set MFE_DOCKER_IMAGE=…`, check the rendered settings, `k8s
+start`, migrate, then confirm the **other** environment on the same box is untouched (its
+`config.yml` hash and deployments). Each keeps its own settings in its Tutor config, which the
+roll-forward must not lose — see runbook **17** §4b.
+
+---
+
+## 3. Production secrets → k8s Secrets (NOT plugin files, NOT git, NOT images)
+
+Created by hand, per environment. `SECRETS.md` in `openedx-deploy` lists every one.
+
 ```bash
 kubectl -n openedx create secret generic sqa-stripe \
   --from-literal=SQA_STRIPE_SECRET_KEY=sk_live_... \
@@ -70,124 +131,66 @@ kubectl -n openedx create secret generic sqa-gateway \
   --from-literal=SQA_GATEWAY_URL="https://sqa-proxytoken-service.vercel.app" \
   --from-literal=SQA_GATEWAY_INTERNAL_SECRET="<secret>" \
   --dry-run=client -o yaml | kubectl apply -f -
-
-# Wire each secret into the LMS pod as env vars (envFrom):
-kubectl -n openedx patch deployment lms --type=json \
-  -p='[{"op":"add","path":"/spec/template/spec/containers/0/envFrom/-","value":{"secretRef":{"name":"sqa-gateway"}}}]'
-kubectl -n openedx rollout restart deployment/lms
 ```
-The plugin's `settings/common.py` reads these via `os.environ`. 🚨 This is *why* secrets are k8s
-Secrets and not a Tutor patch — `plugin_settings()` overwrites with `os.environ.get(...)`, so a Tutor
-patch would be silently clobbered.
 
-## 2. Deploy the Django plugin (openedx image)
+The plugin's `settings/common.py` reads these via `os.environ`. 🚨 This is *why* they are k8s
+Secrets and not a Tutor patch — `plugin_settings()` overwrites with `os.environ.get(...)`, so a
+Tutor patch would be silently clobbered.
+
+**Image pulls** use the `ghcr-pull` docker-registry secret attached to each namespace's
+`default` ServiceAccount (`openedx-deploy/k3s/serviceaccount-pull-secret.sh`). If pods sit in
+`ImagePullBackOff` with `403` from ghcr.io, the token in that secret has been revoked: replace
+it in **every** namespace on the box and delete the stuck pods.
+
+---
+
+## 4. Migrations
+
+`deploy.sh` runs them. By hand:
 
 ```bash
-tutor images build openedx
-# ✅ verify the plugin is actually IN the image before pushing — don't waste a push/deploy:
-docker run --rm $(tutor config printvalue DOCKER_IMAGE_OPENEDX) pip show sqa-django-app
-tutor images push openedx
-
-# Force k8s to pull the new image (see §4), then roll:
-kubectl -n openedx patch deployment lms \
-  -p '{"spec":{"template":{"spec":{"containers":[{"name":"lms","imagePullPolicy":"Always"}]}}}}'
-kubectl -n openedx rollout restart deployment/lms
-kubectl -n openedx rollout status deployment/lms --timeout=300s
-
-# ✅ verify in the live pod + endpoint:
-tutor k8s exec lms -- pip show sqa-django-app
-curl https://$(tutor config printvalue LMS_HOST)/sqa/health/
-
-# If you added migrations:
-tutor k8s exec lms -- python manage.py lms migrate sqa_django_app
+kubectl -n $NS exec deploy/lms -- ./manage.py lms migrate --noinput
+kubectl -n $NS exec deploy/cms -- ./manage.py cms migrate --noinput
+kubectl -n $NS exec deploy/lms -- ./manage.py lms showmigrations sqa_django_app
 ```
 
-### 🚨 Bust the Docker cache when only `@main` changed
-> **Superseded by CI (see §0)** — kept for the fallback path only.
-The pip URL ends `@main`. Docker caches that layer keyed on the **string**, not the git HEAD — new
-commits to `main` don't invalidate it. Either pin the current SHA, or rebuild `--no-cache`:
-```bash
-COMMIT=$(git ls-remote https://<PAT>@github.com/Scient-Systems/sqa_django_app.git main | cut -f1)
-tutor config save --set "OPENEDX_EXTRA_PIP_REQUIREMENTS=['git+https://<PAT>@github.com/Scient-Systems/sqa_django_app.git@${COMMIT}']"
-tutor images build openedx
-# or, brute force (30–45 min): tutor images build openedx --no-cache
-```
-Use `--no-cache` for the **first** deploy after adding migrations (so the new migration files are in
-the image).
-
-## 3. Deploy an MFE (mfe image)
-
-```bash
-# 🚨 commit + push the MFE / tutor-indigo repo FIRST — the build clones from GitHub, ignores local files
-tutor config save --set SQA_PAYMENT_MFE_URL=https://apps.lms.stemquestacademy.com/sqa-payment  # bakes the nav href
-tutor images build mfe
-# ✅ verify the app compiled in:
-docker run --rm $(tutor config printvalue MFE_DOCKER_IMAGE) ls /openedx/dist/ | grep sqa   # → sqa-payment/
-tutor images push mfe
-
-kubectl -n openedx patch deployment mfe \
-  -p '{"spec":{"template":{"spec":{"containers":[{"name":"mfe","imagePullPolicy":"Always"}]}}}}'
-kubectl -n openedx rollout restart deployment/mfe
-kubectl -n openedx rollout status deployment/mfe --timeout=300s
-
-# ✅ verify:
-curl -I https://apps.$(tutor config printvalue LMS_HOST)/sqa-payment/      # HTTP 200
-```
-🚨 `tutor dev restart learner-dashboard` / `restart mfe-app` don't exist — the service is `mfe`;
-individual MFEs are static bundles inside it.
-
-## 4. 🚨 The imagePullPolicy trap (re-apply EVERY same-tag push)
-> **Superseded by CI (see §0)** — manifest-hash tags mean the tag is never reused.
-
-k8s uses containerd with `imagePullPolicy: IfNotPresent` by default. If you push a new image under
-the **same tag**, k8s won't re-pull — the node has it cached → your rollout runs the OLD code. You
-MUST patch `imagePullPolicy: Always` before each rollout where the tag is unchanged (shown in §2/§3).
-This patch is also lost if a deployment is recreated — re-apply it then.
-
-## 5. Migrations on k8s
-```bash
-tutor k8s exec lms -- python manage.py lms migrate sqa_django_app
-tutor k8s exec lms -- python manage.py lms showmigrations sqa_django_app
-```
 🚨 If `migrate` says "No migrations to apply" but a table is missing, a prior run fake-applied it.
 Recover: `migrate sqa_django_app <prev> --fake` then `migrate` for real.
 
-## 6. 🚨 NEVER `pip install --force-reinstall` in a running pod
+---
+
+## 5. 🚨 NEVER `pip install --force-reinstall` in a running pod
+
 It can remove `pkg_resources`/`setuptools`; the running process survives but the **next restart
-crashes the pod** (`ModuleNotFoundError: No module named 'pkg_resources'`, CrashLoopBackOff). The only
-correct fix is `tutor images build openedx --no-cache` → push → deploy a fresh image. Fix pip/image
-problems by rebuilding the image, never by mutating a live pod.
+crashes the pod** (`ModuleNotFoundError: No module named 'pkg_resources'`, CrashLoopBackOff).
+Fix code by shipping a new image through CI, never by mutating a live pod.
 
-## 7. Condensed "subsequent deploy" recipes
+---
+
+## 6. Observability
 
 ```bash
-# Django plugin (after pushing code):
-tutor images build openedx && docker run --rm $(tutor config printvalue DOCKER_IMAGE_OPENEDX) pip show sqa-django-app
-tutor images push openedx
-kubectl -n openedx patch deployment lms -p '{"spec":{"template":{"spec":{"containers":[{"name":"lms","imagePullPolicy":"Always"}]}}}}'
-kubectl -n openedx rollout restart deployment/lms && kubectl -n openedx rollout status deployment/lms --timeout=300s
-
-# MFE (after pushing code):
-tutor images build mfe && tutor images push mfe
-kubectl -n openedx patch deployment mfe -p '{"spec":{"template":{"spec":{"containers":[{"name":"mfe","imagePullPolicy":"Always"}]}}}}'
-kubectl -n openedx rollout restart deployment/mfe && kubectl -n openedx rollout status deployment/mfe --timeout=300s
+kubectl -n $NS get pods
+kubectl -n $NS get deploy lms mfe -o jsonpath='{range .items[*]}{.metadata.name}={.spec.template.spec.containers[0].image}{"\n"}{end}'
+kubectl -n $NS logs deployment/lms --tail 50
+kubectl -n $NS logs deployment/caddy --since=1h | grep '"status":500'   # every 500, with its URL
+kubectl -n $NS exec -i deploy/lms -- ./manage.py lms shell < script.py
+free -h                                                                   # before anything heavy
 ```
 
-## 8. Observability
-```bash
-kubectl -n openedx get pods
-kubectl -n openedx logs deployment/lms --tail 50
-kubectl -n openedx logs deployment/mfe --tail 20
-tutor k8s exec lms -- python manage.py lms shell -c "..."
-```
-🚨 On k8s, `tutor k8s start` applies manifests/ConfigMaps; to recycle pods on an unchanged image tag
-use `kubectl rollout restart`. Toggling a waffle switch needs a `rollout restart deployment/lms` to
-take effect (switches read at import time).
+🚨 `tutor22 k8s start` applies manifests and ConfigMaps; to recycle pods on an unchanged image
+use `kubectl rollout restart`. Toggling a waffle switch needs a `rollout restart deployment/lms`
+to take effect (the plugin builds its URL list at startup).
+
+🚨 Never `pkill -f <pattern>` when the pattern also appears in your own ssh command line — it
+kills your own shell. Find the PID and kill that.
 
 ---
 
 ## What's next
 
+- The everyday flow, k-12 and the demo → **17-shipping-a-change.md**
+- A new instance on a box → **18-spinning-up-a-new-instance.md**
 - Deploy the gateway / Streamlit companion services → **13-deploying-companion-services.md**
 - Stripe specifics (keys/webhook/prices) → **14-stripe-payments-integration.md**
 - Anything broke? → **15-troubleshooting-and-gotchas.md**

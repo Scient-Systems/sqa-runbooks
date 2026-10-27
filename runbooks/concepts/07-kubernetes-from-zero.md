@@ -101,7 +101,7 @@ problem wearing a Kubernetes costume (→ concepts/05 §4, concepts/09).
 | What is the app itself saying? | `kubectl -n openedx logs deploy/lms --tail=50` (add `-f` to follow, `--previous` for the *last* crash) |
 | What happened cluster-wide recently? | `kubectl -n openedx get events --sort-by=.lastTimestamp \| tail -20` |
 | Did my rollout actually finish? | `kubectl -n openedx rollout status deployment/lms` — **the honest one; never trust `apply` alone** |
-| Let me look inside the container | `kubectl -n openedx exec -it deploy/lms -- bash` (or `tutor k8s exec lms bash`) |
+| Let me look inside the container | `kubectl -n openedx exec -it deploy/lms -- bash` (namespaces per site: runbook 12) |
 | Who's eating the node? | `kubectl top pods -n openedx --sort-by=memory` (live usage) / `kubectl describe node \| grep -A10 "Allocated resources"` (what the *scheduler* believes — these differ, and scheduling runs on the second!) |
 
 Status decoder: `Pending` = no room/can't schedule → describe, look for FailedScheduling.

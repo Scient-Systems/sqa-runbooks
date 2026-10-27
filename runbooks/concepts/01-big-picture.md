@@ -44,7 +44,7 @@ Think of the platform as five layers. Every task you'll ever do lives in exactly
 │ 2. ORCHESTRATION Kubernetes — keeps the right containers        │
 │                  running, wired, and fed with config (→ 07)     │
 ├──────────────────────────────────────────────────────────────────┤
-│ 1. MACHINE       one VPS: 8 GB RAM, one disk, one IP address    │
+│ 1. MACHINE       two VPSes, each with its own disk and IP       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,8 +79,11 @@ from the "code" column into the "config" column so changes get cheaper.
 
 ## 4. Production, concretely
 
-One VPS runs Kubernetes ("k8s"), managed through `tutor k8s`. On it, in the `openedx`
-namespace, live roughly these pods (a pod ≈ one running program, → concepts/07):
+Two VPSes each run Kubernetes ("k8s"), managed through Tutor 22 (installed there as
+`tutor22`). Each box hosts two sites, each in its own namespace: VPS 1 has production
+(`openedx`) and the training demo (`openedx-demo`); VPS 2 has staging (`openedx`) and k-12
+(`openedx-verawood`). The table of hosts and roots is in runbook 12. In production's
+`openedx` namespace live roughly these pods (a pod ≈ one running program, → concepts/07):
 
 - `lms` — the big one: Django serving lms.stemquestacademy.com. **Our plugin runs inside
   this process.**

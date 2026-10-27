@@ -59,7 +59,7 @@ tells Tutor how our whole installation differs from stock.
 |---|---|---|
 | `tutor dev` | docker-compose, dev conveniences (auto-reload, mounted source) | daily development in WSL2 |
 | `tutor local` | docker-compose, production-ish | (not used) |
-| `tutor k8s` | Kubernetes manifests | production on the VPS |
+| `tutor22 k8s` | Kubernetes manifests | all four sites on the two VPSes (the server install is named `tutor22`) |
 
 Same rendered `env/`, different runner. That's Tutor's quiet superpower: dev and prod
 share one source of truth, so "works in dev" usually survives the trip.
@@ -71,17 +71,18 @@ verified at the **cheapest tier that can catch it being wrong**:
 |---|---|---|---|
 | 1. `pytest` (SQLite, no LMS) | seconds | models, the eligibility rule, view logic with LMS APIs stubbed — ~80% of changes | plugin loading, real signals, real auth |
 | 2. `tutor dev` (WSL2) | minutes | entry-point wiring, real signals, real OAuth, template rendering | image builds, k8s config flow, public webhooks |
-| 3. k8s deploy (VPS) | tens of minutes | everything — production truth | nothing, but at maximum cost per attempt |
+| 3. CI build + staging deploy | ~10 minutes to an hour | everything — production truth | nothing, but at maximum cost per attempt |
 
 Escalate a tier only when the current one *genuinely cannot falsify* your change.
 Debugging at tier 3 what tier 1 could have caught is the most common way to lose an
 afternoon. (→ concepts/14 §5 shows this ladder used on a real feature.)
 
-> 🚨 **The one place our dev/prod symmetry is broken (this has burned us):** the VPS has
-> our *fork* of tutor-indigo injected editably (pipx), so `git pull` + `tutor config save`
-> picks up fork changes. The WSL2 dev machine has the *stock pip release* of tutor-indigo
-> — fork changes (theme, patches, plugin.py) **cannot be validated locally**; they're
-> only real on the VPS. Details → runbook 10 §1.
+> 🚨 **The one place our dev/prod symmetry is broken (this has burned us):** the servers have
+> our *fork* of tutor-indigo injected editably into `tutor22` (pipx), from one checkout per
+> box, so checking out a commit there + `tutor22 config save` picks up fork changes. A fresh
+> dev machine has the *stock pip release* of tutor-indigo — fork changes (theme, patches,
+> plugin.py) **are invisible locally** until you `pip install -e` your clone. Details →
+> runbook 10 §1 and runbook 11 §3.
 
 ## 4. Everyday inspection verbs
 
@@ -97,8 +98,9 @@ image → pod → browser*.
 ## 5. Releases & upgrades — the future tax
 
 Open edX ships **named releases** (~every 6 months), and **each Tutor major version is
-married to one of them** — our Tutor 21.x runs release "Teak"-era code as image tag
-`21.0.2`. Upgrading is therefore never "bump a number": it's new Tutor + new images +
+married to one of them** — we moved from Tutor 21 ("Ulmo") to Tutor 22 ("Verawood") in
+September–October 2026, staging first, then k-12, production and the demo. The scripts and notes
+are in `openedx-deploy/verawood/`. Upgrading is never "bump a number": it's new Tutor + new images +
 **database migrations** (backup first! → concepts/13) + re-validating everything we've
 customized. Budget the honest checklist now, not during the upgrade:
 

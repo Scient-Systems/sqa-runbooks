@@ -39,8 +39,9 @@ When something auth-ish breaks, first classify the world — it names the fix.
 | Stripe secret key + webhook signing secret | 2 | k8s Secret `sqa-stripe` | plugin webhook/API code | update Secret, restart lms |
 | Gateway shared secret + URL | 2 | k8s Secret `sqa-gateway` | plugin ↔ proxytoken service | update both sides, restart |
 | Scoped course tokens | 2 | issued/stored by proxytoken service (Neon) | course tooling | admin: rotate/revoke (built-in) |
-| GitHub PAT (packages) | 3 | your `docker login` credential store on the VPS | image push/pull by docker | make new PAT, re-login |
-| `ghcr-pull` imagePullSecret | 3 | k8s Secret in `openedx` ns | **kubelet** pulling private images | recreate secret with new PAT (see below) |
+| Image push credential | 3 | the CI workflow's own `GITHUB_TOKEN` | pushing images to GHCR | nothing to rotate — GitHub issues it per run |
+| `MFE_CLONE_TOKEN` | 3 | GitHub Actions secret in `openedx-deploy` | CI cloning the two private source repos | new token with read access to both, `gh secret set MFE_CLONE_TOKEN` |
+| `ghcr-pull` imagePullSecret | 3 | k8s Secret in **every** namespace, on its `default` ServiceAccount | **kubelet** pulling private images | recreate it in each namespace with a new `read:packages` token (see below) |
 | SSH keys | 3 | `~/.ssh` | you | standard practice |
 
 Two mechanics worth knowing about k8s Secrets: they're **base64-encoded, not encrypted**
