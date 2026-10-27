@@ -4,8 +4,13 @@
 > part runs, and which runbook to open for which job. If you are brand new to Open edX,
 > read this top to bottom once — it will make every other runbook make sense.
 
-These runbooks are distilled from real build sessions (May–June 2026). Every command here
-has actually been run on this project. Where something bit us, the gotcha is written down
+These runbooks are distilled from real build sessions (May–October 2026). Every command here
+has actually been run on this project.
+
+> 🚨 **Since 2026-10-27 every site runs Open edX Verawood on Tutor 22.** On the servers the CLI is
+> `tutor22`, never plain `tutor`. The theme and brand repos live on `verawood/indigo`, and
+> `openedx-deploy` `main` is the Verawood line. Anything you read elsewhere about Ulmo, Tutor 21,
+> the `release` / `ulmo/indigo` branches or `openedx:21.0.x` image tags is history. Where something bit us, the gotcha is written down
 so you never rediscover it. The deep "why" docs still live at the repo root
 (`LOCAL_DEV.md`, `PROD_DEPLOYMENT.md`, `MFE_COMPONENT_GUIDE.md`, `LMS_THEMING_GUIDE.md`,
 `SQA_PLUGIN_CONTEXT.md`) — the runbooks are the **operational** layer on top of them.
@@ -74,18 +79,21 @@ A membership-gated Open edX site. The custom value we add on top of stock Open e
 │  Repos you edit (all under ~/ , inside the Linux filesystem — NOT /mnt/c):            │
 │   ~/sqa_django_app           Django plugin: membership, billing, AI-token broker      │
 │   ~/frontend-app-sqa-payment Custom React MFE: pricing/checkout/manage pages          │
-│   ~/tutor-indigo             Theme + MFE component injection (a Tutor plugin, forked)  │
-│   ~/brand-openedx            MFE design tokens + SCSS (the @edx/brand package)         │
+│   ~/tutor-indigo             Theme + MFE widgets (a Tutor plugin, forked)  verawood/indigo │
+│   ~/brand-openedx            MFE design tokens + SCSS (the @edx/brand package)  verawood/indigo │
+│   ~/openedx-deploy           versions.yml, CI builds, deploy scripts, per-env config   │
 │   ~/sqa-homepage             Marketing homepage (Next.js, totally standalone)          │
 │   ~/sqa-proxytoken-service   AI gateway (FastAPI) — deployed to Vercel, not Tutor      │
 │   ~/silly_bot_course_project Course content (OLX) + companion Streamlit app           │
 └───────────────────────────────────────────────────────────────────────────────────────┘
-                                          │  git push
+                                          │  git push → pin in openedx-deploy → CI build
                                           ▼
-┌──────────────────────────── PRODUCTION (VPS, Kubernetes via Tutor k8s) ───────────────┐
-│  lms / cms / mfe pods (custom Docker images on GHCR)                                   │
-│  k8s Secrets:  sqa-stripe (Stripe keys), sqa-gateway (broker URL+secret)              │
-│  LMS host:  lms.stemquestacademy.com     MFE host: apps.lms.stemquestacademy.com      │
+┌──────────── TWO VPSes, Kubernetes (k3s) via Tutor 22 (`tutor22`), images on GHCR ──────┐
+│  VPS 1  Production  lms.stemquestacademy.com / apps.lms.…        ns openedx           │
+│         Demo        training-demo.stemquestacademy.com / apps.…  ns openedx-demo      │
+│  VPS 2  Staging     staging.stemquestacademy.com / apps.staging.… ns openedx          │
+│         k-12        k-12.stemquestacademy.com / apps.k-12.…      ns openedx-verawood  │
+│  k8s Secrets per namespace: sqa-stripe (Stripe keys), sqa-gateway, ghcr-pull           │
 └───────────────────────────────────────────────────────────────────────────────────────┘
         │                                   │
         ▼ (separate deploys, NOT Tutor)     ▼
@@ -107,14 +115,18 @@ Different changes deploy through completely different pipelines. Picking the wro
 
 | You changed… | Pipeline | Runbook |
 |---|---|---|
-| Python in `sqa_django_app` | Rebuild **openedx** image → push → rollout LMS | 06, 12 |
-| A custom MFE's React code (`frontend-app-sqa-payment`) | Rebuild **mfe** image → push → rollout MFE | 08, 12 |
-| An MFE **slot widget / `env.config.jsx`** (`tutor-indigo` components) | Rebuild **mfe** image → push → rollout MFE | 09, 12 |
-| Legacy LMS theme (`tutor-indigo` SCSS/templates) | Rebuild **openedx** image → push → rollout LMS | 10, 12 |
-| Brand **design tokens only** (`brand-openedx` JSON/CSS) | Push brand → `tutor config save` → rollout LMS (no rebuild) | 10 |
-| A Tutor plugin file (`tutor-plugins/*.py`) | `tutor config save` (+ maybe image rebuild) | 07 |
+| Python in `sqa_django_app` | push `main` → pin PR opens itself in `openedx-deploy` → merge → CI builds → staging auto → production by button | 06, 17 |
+| A custom MFE's React code (`frontend-app-sqa-payment`) | push `main` → **you** change its pin in `versions.yml` → same as above | 08, 17 |
+| An MFE **slot widget / `env.config.jsx`** (`tutor-indigo` components) | push `verawood/indigo` → **you** change its pin → same as above | 09, 17 |
+| Legacy LMS theme (`tutor-indigo` SCSS/templates) | push `verawood/indigo` → **you** change its pin → same as above | 10, 17 |
+| Brand CSS (`brand-openedx`) | push `verawood/indigo` → bump `BRAND_DIST_REF` in `tutor-indigo` → pin **both** | 10, 17 §3 |
+| A Tutor plugin file (`tutor-plugins/*.py`) | in `openedx-deploy`; build-time ones need a build, runtime ones a `tutor22 config save` on the box | 07 |
+| A per-site setting (footer links, membership, name…) | `tutor22 config save --set …` on that site's root, then `k8s start` | 11, 12 |
 | The gateway service | `git push` → Vercel auto-deploy | 13 |
 | A course | Studio import/export — no deploy at all | 05 |
+
+Every build gives **both** images one new tag (the hash of `versions.yml`). k-12 and the demo
+are not in the pipeline: they are rolled forward by hand (17 §4b).
 
 ---
 
@@ -132,6 +144,10 @@ in **runbook 06 §2** — read it once early; it's the conceptual spine.
 ## 5. Glossary (terms you'll hit everywhere)
 
 - **Tutor** — the Docker-based Open edX manager CLI. Three run modes: `dev`, `local`, `k8s`.
+  We run Tutor 22 (Verawood); on the servers it is installed as `tutor22`.
+- **Verawood / Ulmo** — Open edX release names. Verawood is what runs; Ulmo is the retired line.
+- **`versions.yml`** — the file in `openedx-deploy` that pins every input of an image build.
+  Its hash is the image tag.
 - **MFE** — Micro-Frontend; a standalone React app (learner-dashboard, profile, our sqa-payment…).
 - **OLX** — Open Learning XML; the file format courses are authored/exported in.
 - **Waffle switch** — a database-backed feature flag. Our plugin gates whole feature groups

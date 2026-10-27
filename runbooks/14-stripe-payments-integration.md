@@ -83,9 +83,13 @@ Expected (no subscription yet):
 
 ## 4. Production setup (live mode)
 
-Secrets go in the **k8s Secret `sqa-stripe`** — never a plugin file, git, or image (runbook 12 §1c).
-The non-secret price map + MFE URL go in `sqa_stripe_prod.py` (patches
-`openedx-lms-production-settings`).
+Secrets go in the **k8s Secret `sqa-stripe`** — never a plugin file, git, or image (runbook 12 §3).
+The non-secret price map goes in `sqa_stripe_prod.py` (patches `openedx-lms-production-settings`;
+it lives in production's `tutor-prod-verawood-plugins` folder and in `openedx-deploy`). The
+payment MFE's URL is no longer configured: it is derived from the request.
+
+Staging and production both use **Stripe test mode** today, from one shared test account; k-12 has
+its own `sqa_stripe_k12` plugin and hides membership altogether.
 
 ```bash
 kubectl -n openedx create secret generic sqa-stripe \

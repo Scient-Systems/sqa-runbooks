@@ -25,7 +25,9 @@ For theming MFEs, runbook 10.
 > `sqa-payment` is `:2003` (chosen to sit outside that range).
 
 All the stock MFEs are run by Tutor's official **`mfe`** plugin. Custom ones are registered by our
-own Tutor plugin (`sqa_payment.py`). We're on MFE release branch **`release/ulmo.3`**.
+own Tutor plugin (`sqa_payment.py`). We're on the **Verawood** MFE releases (`tutor-mfe` 22.1.0,
+MFEs on their `release/verawood.*` branches). New on Verawood: the **Catalog MFE** is the homepage,
+course list and course about page (`apps.<host>/catalog/`), styled through `tutor-indigo` slots.
 
 🚨 **One container, many MFEs.** In dev each MFE *can* run its own webpack dev server, but in
 production all MFEs are compiled to static bundles and served by **one `mfe` container** behind Caddy.
@@ -115,15 +117,18 @@ build-time**. There is no runtime shortcut (except brand *token* CSS — runbook
 ```bash
 # 🚨 commit + push FIRST — the mfe image clones from GitHub, local files are ignored
 git add -A && git commit && git push          # in the MFE repo (user does this)
-
-tutor config save                              # if a Tutor plugin / slot changed
-tutor images build mfe                         # LONG (15–40 min) — compiles ALL MFEs
-docker run --rm $(tutor config printvalue MFE_DOCKER_IMAGE) ls /openedx/dist/ | grep my-app  # ✅
-tutor images push mfe
-# then roll out — runbook 12 §MFE
 ```
-🚨 Set `MFE_DOCKER_IMAGE` to your own registry **before** the first build, or push is rejected
-(runbook 12). Remember indigo appends `-indigo` to the image tag (runbook 11).
+
+Then the pipeline (runbook **17**): set that repo's `ref:` in `openedx-deploy` `versions.yml`, merge
+to `main`. CI builds both images (it compiles **all** MFEs: ~7 min warm, up to ~1 hour cold),
+verifies the payment app is inside, and staging deploys itself. No server builds an image.
+
+To build locally while developing (`tutor images build mfe`), your own `MFE_DOCKER_IMAGE` is fine;
+never push a locally built image to `ghcr.io/scient-systems`.
+
+🚨 A **new custom MFE** also needs its plugin (like `sqa_payment.py`) in `openedx-deploy`
+`tutor-plugins/` for the build, and in each site's `<root>-plugins` folder, enabled with
+`tutor22 plugins enable` there. A private repo is cloned with the `MFE_CLONE_TOKEN` secret.
 
 ---
 

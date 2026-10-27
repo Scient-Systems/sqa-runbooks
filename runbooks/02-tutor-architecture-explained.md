@@ -4,7 +4,9 @@ Tutor is the Docker-based manager for Open edX. Almost everything you do touches
 10 minutes here — it will save you days. Nothing in this runbook is a command you must run right
 now; it's the mental model the other runbooks assume.
 
-We run **Tutor v21** (the "Ulmo" Open edX release, MFEs on branch `release/ulmo.3`).
+We run **Tutor 22.0.2** (the "Verawood" Open edX release) since October 2026. The previous line,
+Tutor 21 / Ulmo, is retired. On the servers the CLI is installed as **`tutor22`**; on your laptop
+it is plain `tutor`. Everything below applies to both.
 
 ---
 
@@ -16,7 +18,7 @@ Tutor runs the *same* Open edX in three different ways. Pick the right one for t
 |---|---|---|---|
 | **dev** | `tutor dev …` | Dockerized, with **live code mounting + hot reload + dev settings**. The only mode where editing a file on your host changes the running app. | Day-to-day local development. |
 | **local** | `tutor local …` | Dockerized, **production-like** on one machine (no live mounting, prod settings, Caddy/TLS). | Rarely — a prod smoke test on your laptop. |
-| **k8s** | `tutor k8s …` | Deploys to a **Kubernetes** cluster (our VPS). | Production. Runbook 12. |
+| **k8s** | `tutor22 k8s …` (servers) | Deploys to a **Kubernetes** cluster (k3s on our two VPSes). | Production, staging, k-12, the demo. Runbook 12. |
 
 > 🚨 You cannot iterate on code in `local` or `k8s` — there's no mounting. For dev work it's
 > always `tutor dev`. (Task discipline: "DO NOT use `tutor local` for iteration.")
@@ -33,6 +35,11 @@ Tutor runs the *same* Open edX in three different ways. Pick the right one for t
 
 ~/.local/share/tutor-plugins/      ← our custom Tutor plugins (*.py). See runbook 07.
 ```
+
+That is the layout on your laptop. On the **servers** each site has its own pair, named after
+it, and both must be exported before any `tutor22` command:
+`TUTOR_ROOT=~/.local/share/tutor-prod-verawood` and
+`TUTOR_PLUGINS_ROOT=~/.local/share/tutor-prod-verawood-plugins` (runbook 12 lists all four).
 
 Two rules that follow from this:
 
@@ -61,8 +68,8 @@ config.yml  +  enabled plugins  ──[ tutor config save ]──▶  env/  (ren
 - **`tutor config save`** re-renders `env/` from templates + plugins. Fast (seconds). You run it
   after changing `config.yml` or any Tutor plugin.
 - **`tutor images build <name>`** bakes `env/` (+ git-cloned source) into a Docker image. Slow
-  (10–45 min). You run it after changes that must live *inside* the image (Python deps, themes,
-  MFE bundles).
+  (10–45 min). Needed after changes that must live *inside* the image (Python deps, themes,
+  MFE bundles). For our servers **CI does this**, never a person on a box (runbook 12).
 - **`tutor dev/local/k8s start`** runs containers from the image.
 
 **Knowing which of these three a change requires is the whole game.** See the §4 table in
@@ -77,13 +84,18 @@ Ours live in `~/.local/share/tutor-plugins/`. List them:
 tutor plugins list
 ```
 
-On this project:
+On your laptop:
 ```
 indigo          ✅ enabled   theme + MFE component injection (forked tutor-indigo)
 mfe             ✅ enabled   runs all the MFEs (official plugin)
 sqa_payment     ✅ enabled   registers our sqa-payment MFE + the "Membership" nav link
 sqa_stripe_dev  ✅ enabled   injects Stripe test keys into LMS dev settings
 ```
+
+On the servers (staging shown): `indigo`, `mfe`, `minio`, `forum`, `codejail`, `sqa_payment`,
+`sqa_stripe_staging`, `sqa_gateway_prod`, `enable_course_settings`, `host_proxy_nodeport`
+(publishes Tutor's Caddy to the host Caddy) and `studio_content_groups_redirect`. Each site has
+its own `sqa_stripe_*` and NodePort plugin.
 
 Enable/disable:
 ```bash
@@ -142,15 +154,20 @@ Two custom images matter:
 - **mfe** — serves all the MFEs as static bundles via Caddy. Bakes in: each MFE's compiled JS,
   including `env.config.jsx` and brand CSS.
 
-> 🚨 The openedx image installs the **private** plugin repo via a PAT embedded in the pip URL
-> (`OPENEDX_EXTRA_PIP_REQUIREMENTS`). That PAT ends up in the image's pip cache layer — **treat the
-> image as containing a credential. Only push to a *private* registry (GHCR private).**
+> 🚨 The openedx image installs the **private** plugin repo via a token embedded in the pip URL
+> (`OPENEDX_EXTRA_PIP_REQUIREMENTS`, written as `x-access-token:<token>@github.com/…`). That
+> token can end up in the image's pip cache layer — **treat the image as containing a credential.
+> Only push to a *private* registry (GHCR private).** CI does all of this for you (runbook 12).
 
-## 8. Indigo renames your image tags (don't be surprised)
+## 8. Image names and tags
 
-The `indigo` plugin appends `-indigo` to your image names. So after enabling indigo,
-`DOCKER_IMAGE_OPENEDX` becomes `…/openedx-indigo` and `MFE_DOCKER_IMAGE` becomes `…/openedx-mfe-indigo`.
-Check with `tutor config printvalue DOCKER_IMAGE_OPENEDX`. This matters when you push/pull. Runbook 11.
+On a fresh local install, the `indigo` plugin appends `-indigo` to the default image names, so
+`DOCKER_IMAGE_OPENEDX` becomes `…/openedx-indigo`. Check with
+`tutor config printvalue DOCKER_IMAGE_OPENEDX`.
+
+On the servers that never applies: every site's config sets both names explicitly, to
+`ghcr.io/scient-systems/openedx:<tag>` and `ghcr.io/scient-systems/openedx-mfe:<tag>`, where the
+tag is the hash of `openedx-deploy`'s `versions.yml`. Runbooks 11 and 12.
 
 ---
 

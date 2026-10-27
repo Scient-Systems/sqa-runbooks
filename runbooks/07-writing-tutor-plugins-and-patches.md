@@ -121,8 +121,15 @@ PLUGIN_SLOTS.add_item((
 ))
 ```
 This is the full pattern for "add a new MFE" (runbook 08) and "inject a component" (runbook 09).
-🚨 Anything touching `env.config.jsx` / `PLUGIN_SLOTS` is **build-time** — it needs
-`tutor images build mfe`, not just a restart.
+🚨 Anything touching `env.config.jsx` / `PLUGIN_SLOTS` is **build-time** — it needs a new mfe
+image (`tutor images build mfe` locally; through CI for the servers, runbook 17), not just a
+restart.
+
+🚨 **Where plugin files live on the servers:** each site has its own folder,
+`~/.local/share/<root>-plugins` (e.g. `tutor-prod-verawood-plugins`), set as
+`TUTOR_PLUGINS_ROOT`. A plugin dropped in the old shared `~/.local/share/tutor-plugins` is
+invisible to `tutor22`. The copies kept in git are in `openedx-deploy`
+(`tutor-plugins/` for the image build, `environments/<env>/plugins/` per site).
 
 ## 5. Config defaults & overrides
 

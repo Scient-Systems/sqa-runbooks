@@ -90,7 +90,7 @@ kubectl -n openedx rollout restart deployment/lms
 After issuing a token on the LMS `/sqa/tokens/` page, confirm it reached the gateway DB:
 ```bash
 # 1. Get the hash from the LMS:
-tutor k8s exec lms -- python manage.py lms shell -c "
+kubectl -n openedx exec deploy/lms -- python manage.py lms shell -c "
 from sqa_django_app.models import ProxyToken
 t = ProxyToken.objects.filter(status='active').last()
 print('sync_state:', t.sync_state); print('hash:', t.token_hash)"
@@ -101,7 +101,10 @@ curl -s -X POST https://sqa-proxytoken-service.vercel.app/internal/tokens/revoke
   -H "Content-Type: application/json" -d '{"token_hash": "<hash>"}'
 # {"ok": true} = present in gateway DB.  {"detail":"Token not found"} = sync failed.
 ```
-There's also a reconcile command for drift: `tutor k8s exec lms -- python manage.py lms sqa_proxy_reconcile`.
+There's also a reconcile command for drift: `kubectl -n openedx exec deploy/lms -- python manage.py lms sqa_proxy_reconcile`.
+
+(The AI-token broker needs the `api_proxy` switch: on for production and staging, off on k-12 —
+runbook 04.)
 
 🚨 `CourseIntegrationGrant` course-key field is strict — a trailing comma raises `InvalidKeyError` →
 500. Enter the clean key (`course-v1:SQA+SQA405+2026_T2`).

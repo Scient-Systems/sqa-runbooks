@@ -14,16 +14,22 @@ rest is paste-and-go.
 DNS (4 names) → Caddy + TLS → Tutor config → plugins → start → init → theme + admin → search → features
 ```
 
-- **~45–60 min**, of which `tutor k8s init` is ~18 min of waiting.
+- **~45–60 min**, of which `tutor22 k8s init` is ~18 min of waiting.
 - **No image rebuild.** You reuse the images already on the VPS.
 - The new instance gets **its own database, its own users, its own secrets**. It shares only
   the server and the Docker images.
-- Four things must be **different** from every other instance on the VPS: `TUTOR_ROOT`,
-  Kubernetes namespace, the Caddy NodePort, and the hostnames.
+- Five things must be **different** from every other instance on the VPS: `TUTOR_ROOT`,
+  `TUTOR_PLUGINS_ROOT`, the Kubernetes namespace, the Caddy NodePort, and the hostnames.
 
-Note: the single biggest way to cause an outage is running a `tutor` command without
-`TUTOR_ROOT` set. It silently targets **production**. Set it in every shell. Twice if you're
-tired.
+Note: the servers run **Tutor 22 (Verawood) as `tutor22`**. Plain `tutor` (Tutor 21, Ulmo) is
+uninstalled on both VPSes and must never come back: on 2026-10-26 it re-applied Ulmo manifests
+over staging and broke search, the databases and the LMS secrets.
+
+Note: the single biggest way to cause an outage is running a `tutor22` command without
+`TUTOR_ROOT` set. Set it in every shell. Twice if you're tired.
+
+Note: **VPS 1 runs production and the demo together** and has about 8 GB free at rest. Check
+`free -h` before you start; a new instance needs ~6 GB, so there is no room for one on VPS 1.
 
 ---
 
@@ -33,7 +39,8 @@ tired.
 2. **Ensure that you have a user account with SSH access to the VPS**, that can `sudo` (needed
    for Caddy) and run `kubectl`.
 3. **Ensure you have Caddy** running on the host on ports 80/443.
-4. **Ensure OpenedX is installed on the VPS** using Tutor on k3s.
+4. **Ensure OpenedX is installed on the VPS** using Tutor 22 on k3s (`tutor22 --version` prints
+   `22.0.2`).
 5. **A GitHub token with `read:packages`** on the org that owns the images. Repo access is
    **not** the same thing — see Troubleshooting.
 6. **A domain** you can add DNS records to.
@@ -54,7 +61,8 @@ export ADMIN_USER=[replace with admin username e.g. demoadmin]
 export ADMIN_EMAIL=[replace with admin email e.g. you@example.com]
 # ---------- CREATE THE FOLLOWING EXACTLY AS THEY ARE ----------
 export NS=openedx-$INSTANCE
-export TUTOR_ROOT=$HOME/.local/share/tutor-$INSTANCE
+export TUTOR_ROOT=$HOME/.local/share/tutor-$INSTANCE-verawood
+export TUTOR_PLUGINS_ROOT=$TUTOR_ROOT-plugins      # every instance has its own plugins folder
 export CMS_HOST=studio.$LMS_HOST
 export MFE_HOST=apps.$LMS_HOST
 export FILES_HOST=files.$LMS_HOST
@@ -70,7 +78,7 @@ kubectl get svc -A -o jsonpath='{range .items[*].spec.ports[*]}{.nodePort}{"\n"}
 ```
 
 Note: this lists the ports already taken — yours must **not** be in the list. NodePorts are
-unique across the whole cluster, not per namespace. Production usually uses `30080`, so pick
+unique across the whole cluster, not per namespace. Production uses `30080`, so pick
 something else.
 
 ---
@@ -190,8 +198,8 @@ sudo journalctl -u caddy -n 50
 ### Step 3.1 - Create the Tutor root and generate secrets
 
 ```bash
-mkdir -p "$TUTOR_ROOT"
-tutor config save        # generates BRAND NEW secrets
+mkdir -p "$TUTOR_ROOT" "$TUTOR_PLUGINS_ROOT"
+tutor22 config save      # generates BRAND NEW secrets
 ```
 
 Note: never copy another instance's `config.yml`. Sharing secrets means a login token from one
@@ -204,8 +212,7 @@ instance is valid on the other.
 ### Step 4.1 - Install the NodePort bridge plugin
 
 ```bash
-mkdir -p ~/.local/share/tutor-plugins
-cat > ~/.local/share/tutor-plugins/host_proxy_nodeport_$INSTANCE.py <<EOF
+cat > $TUTOR_PLUGINS_ROOT/host_proxy_nodeport_$INSTANCE.py <<EOF
 from tutor import hooks
 
 hooks.Filters.ENV_PATCHES.add_item((
@@ -238,7 +245,7 @@ NodePort.
 ### Step 4.2 - Install the Payment MFE URL plugin
 
 ```bash
-cat > ~/.local/share/tutor-plugins/sqa_stripe_$INSTANCE.py <<EOF
+cat > $TUTOR_PLUGINS_ROOT/sqa_stripe_$INSTANCE.py <<EOF
 from tutor import hooks
 
 hooks.Filters.ENV_PATCHES.add_item(("openedx-lms-production-settings", """
@@ -252,11 +259,23 @@ FEATURES["ENABLE_OTHER_COURSE_SETTINGS"] = True
 EOF
 ```
 
-Note: if you have a `sqa_stripe_*` plugin, it hardcodes the *production* MFE URL, so we make a
-new plugin that points to itself.
+Note: `SQA_PAYMENT_MFE_URL` is no longer read on Verawood — the payment MFE's URL is derived
+from the request — so the line is harmless but optional. The plugin is still needed for the
+price map and the CMS feature flag.
 
 Note: leave `SQA_STRIPE_PRICE_TO_LEVEL` empty unless you're demoing payments — then fill it
 from the Stripe **test** dashboard. Never paste live price IDs.
+
+### Step 4.3 - Copy the shared plugin files
+
+```bash
+SRC_PLUGINS=$HOME/.local/share/tutor-staging-verawood-plugins   # an EXISTING instance's plugins folder
+cp $SRC_PLUGINS/enable_course_settings.py $SRC_PLUGINS/sqa_payment.py \
+   $SRC_PLUGINS/studio_content_groups_redirect.py $TUTOR_PLUGINS_ROOT/
+```
+
+Note: these three are the same on every instance. `sqa_payment.py` carries the payment MFE's
+clone token, which is why it is copied from the box and not from a repo.
 
 ---
 
@@ -265,10 +284,13 @@ from the Stripe **test** dashboard. Never paste live price IDs.
 ### Step 5.1 - Enable the plugins first
 
 ```bash
-tutor plugins enable mfe minio indigo codejail \
-  enable_course_settings skip_email_verification disable_public_registration \
+tutor22 plugins enable mfe minio indigo forum \
+  enable_course_settings studio_content_groups_redirect \
   sqa_payment sqa_stripe_$INSTANCE host_proxy_nodeport_$INSTANCE
 ```
+
+Note: this is the set k-12 runs. Staging also enables `codejail` (Python-graded problems) and
+`sqa_gateway_prod` (the AI-token gateway); add them only if the instance needs those.
 
 Note: the order matters — enable the plugins first, because plugin-specific config keys don't
 exist until the plugin is on.
@@ -276,19 +298,25 @@ exist until the plugin is on.
 ### Step 5.2 - Find the image tags currently running
 
 ```bash
-export SRC=$HOME/.local/share/tutor   # TUTOR_ROOT of the EXISTING instance (used again later)
-export SRC_NS=openedx                 # namespace of the EXISTING instance (not your new one)
+export SRC=$HOME/.local/share/tutor-staging-verawood   # TUTOR_ROOT of the EXISTING instance (used again later)
+export SRC_NS=openedx                                  # namespace of the EXISTING instance (not your new one)
 
 export IMG_OPENEDX=$(kubectl -n $SRC_NS get deploy lms -o jsonpath='{.spec.template.spec.containers[0].image}')
 export IMG_MFE=$(kubectl -n $SRC_NS get deploy mfe -o jsonpath='{.spec.template.spec.containers[0].image}')
 
-echo "openedx: $IMG_OPENEDX"   # e.g. ghcr.io/scient-systems/openedx:21.0.2
-echo "mfe:     $IMG_MFE"       # e.g. ghcr.io/scient-systems/openedx-mfe:21.0.0-indigo
+echo "openedx: $IMG_OPENEDX"   # e.g. ghcr.io/scient-systems/openedx:7bde8ac98ba1
+echo "mfe:     $IMG_MFE"       # e.g. ghcr.io/scient-systems/openedx-mfe:7bde8ac98ba1
 ```
 
 Note: we need two image tags — one for the Openedx image, one for the MFE image. Read them off
 the instance already running on this VPS, so the new one reuses images that are already
-downloaded.
+downloaded. Both carry the same tag: the first 12 characters of the sha256 of `versions.yml` in
+`openedx-deploy`.
+
+Note: the theme plugin is loaded from `~/tutor-indigo-verawood`, a checkout shared by every
+instance on the box. It must be at the `tutor-indigo` commit pinned in the `versions.yml` that
+produced your tag — `git -C ~/tutor-indigo-verawood log --oneline -1` — or the rendered
+settings (brand CSS link among them) will not match the image.
 
 Note: there are three places an image tag can come from, and they usually agree. When they
 don't, believe the pods.
@@ -296,13 +324,13 @@ don't, believe the pods.
 | Source | Command | Trust it? |
 |---|---|---|
 | **The running pods** | `kubectl -n <ns> get deploy lms -o jsonpath='{.spec.template.spec.containers[0].image}'` | ✅ **Use this.** What is actually serving traffic |
-| The other instance's config | `TUTOR_ROOT=$SRC tutor config printvalue DOCKER_IMAGE_OPENEDX` | What the config *claims*. Can drift from what was deployed |
+| The other instance's config | `TUTOR_ROOT=$SRC tutor22 config printvalue DOCKER_IMAGE_OPENEDX` | What the config *claims*. Can drift from what was deployed |
 | Cached on the node | `sudo k3s crictl images \| grep openedx` | What will start instantly — good cross-check, but lists old tags too |
 
 ### Step 5.3 - Save the config
 
 ```bash
-tutor config save \
+tutor22 config save \
   --set LMS_HOST=$LMS_HOST \
   --set CMS_HOST=$CMS_HOST \
   --set MFE_HOST=$MFE_HOST \
@@ -331,14 +359,14 @@ a ~4 GB download.
 ### Step 5.5 - Sanity check the config
 
 ```bash
-for k in LMS_HOST CMS_HOST MFE_HOST MINIO_HOST K8S_NAMESPACE ENABLE_WEB_PROXY; do printf '%-18s ' $k; tutor config printvalue $k; done
+for k in LMS_HOST CMS_HOST MFE_HOST MINIO_HOST K8S_NAMESPACE ENABLE_WEB_PROXY; do printf '%-18s ' $k; tutor22 config printvalue $k; done
 ```
 
 ### Step 5.6 - Prove the secrets are different
 
 ```bash
-TUTOR_ROOT=$SRC        tutor config printvalue OPENEDX_SECRET_KEY | sha256sum
-TUTOR_ROOT=$TUTOR_ROOT tutor config printvalue OPENEDX_SECRET_KEY | sha256sum
+TUTOR_ROOT=$SRC        tutor22 config printvalue OPENEDX_SECRET_KEY | sha256sum
+TUTOR_ROOT=$TUTOR_ROOT tutor22 config printvalue OPENEDX_SECRET_KEY | sha256sum
 ```
 
 Note: the two hashes **must differ**. If they match, you copied a config — go back to Step 3.
@@ -375,17 +403,21 @@ ServiceAccount, this is how the pods actually use it.
 ### Step 6.4 - Start the instance
 
 ```bash
-tutor k8s start
+tutor22 k8s start
 kubectl -n $NS get pods -w        # Ctrl-C when everything is Running
 ```
 
 ### Step 6.5 - Initialise the instance
 
 ```bash
-tutor k8s init
+tutor22 k8s init
 ```
 
 Note: Takes a couple of minutes. It ends with `All services initialised.`
+
+Note: 🚨 on Tutor 22 the **MinIO init task hangs**: it uses the `minio/mc` image, which is gone
+from Docker Hub. If init stalls at the MinIO step, stop it and run the other services' init
+tasks on their own with `tutor22 k8s do init --limit=<service>`, leaving out `minio`.
 
 Note: don't blind-retry a failed init. Look first with `kubectl -n $NS get jobs`, then
 `kubectl -n $NS logs job/<name> --tail=50`. A half-initialised database is worth deleting and
@@ -398,7 +430,7 @@ redoing — `kubectl delete namespace $NS`, then start again.
 ### Step 7.1 - Set the theme
 
 ```bash
-tutor k8s do settheme indigo
+tutor22 k8s do settheme indigo
 ```
 
 Note: the theme takes 30–60 seconds to show up. An unstyled page right after `settheme` is
@@ -407,17 +439,17 @@ normal.
 ### Step 7.2 - Create the admin user
 
 ```bash
-tutor k8s do createuser --staff --superuser -p 'CHANGE_ME_STRONG' $ADMIN_USER $ADMIN_EMAIL
+tutor22 k8s do createuser --staff --superuser -p 'CHANGE_ME_STRONG' $ADMIN_USER $ADMIN_EMAIL
 ```
 
 ### Step 7.3 - Build the two search indexes
 
 ```bash
-tutor k8s exec cms ./manage.py cms reindex_studio --init    # Studio's own search
-tutor k8s exec cms ./manage.py cms reindex_course --setup   # the PUBLIC /courses catalog
+kubectl -n $NS exec deploy/cms -- ./manage.py cms reindex_studio --init    # Studio's own search
+kubectl -n $NS exec deploy/cms -- ./manage.py cms reindex_course --setup   # the PUBLIC catalog
 ```
 
-Note: two separate indexes for two separate consumers — `reindex_studio` feeds Studio's authoring search, `reindex_course` feeds the public `/courses` catalog. Re-run `reindex_course` after importing a course, or the new course won't appear in the catalog — especially after a command-line `manage.py cms import`, which doesn't reindex on its own.
+Note: two separate indexes for two separate consumers — `reindex_studio` feeds Studio's authoring search, `reindex_course` feeds the public catalog (on Verawood that is the Catalog MFE at `apps.<host>/catalog/`, which is also the homepage). Re-run `reindex_course` after importing a course, or the new course won't appear in the catalog — especially after a command-line `manage.py cms import`, which doesn't reindex on its own.
 
 Note: use `--setup`, not `--all` — `--all` asks for confirmation and dies with `EOFError`
 because there's no keyboard attached.
@@ -465,11 +497,16 @@ EOF
 ### Step 8.2 - Run the seed script
 
 ```bash
-tutor k8s exec lms ./manage.py lms shell -c "$(cat /tmp/seed.py)"
+kubectl -n $NS exec -i deploy/lms -- ./manage.py lms shell < /tmp/seed.py
 ```
 
 Note: should print `switches enabled: 8`. Less than that means the switch rows weren't created
-yet — check the LMS started cleanly. The sweep is deliberate.
+yet — check the LMS started cleanly.
+
+Note: the sweep turns on **every** `sqa_django_app` switch, which is right for a demo of the
+whole product but not for every site. Staging, production and k-12 deliberately keep
+`api_pathway` off (no Pathways link), and k-12 also keeps `gate_enrollment` and
+`catalog_filter` off. Turn off what this instance should not show, then restart (Step 8.3).
 
 ### Step 8.3 - Restart the LMS and CMS
 
@@ -495,7 +532,7 @@ Note: course import is a background job. With no worker, a Studio import uploads
 hangs at "Unpacking" forever, with no error anywhere. Same for export and reindex.
 
 Note: workers cost about **2.3 GB each**. If memory is tight you can park them at `0` and scale
-`cms-worker` back to `1` before importing. `tutor k8s start` does **not** restore replicas you
+`cms-worker` back to `1` before importing. `tutor22 k8s start` does **not** restore replicas you
 scaled by hand — it reports the deployment `unchanged` and leaves it at zero.
 
 ---
@@ -572,14 +609,16 @@ Note: a queue length that only goes **up** means no worker is consuming jobs.
 | Pods `ImagePullBackOff`, **403 from ghcr.io** | token has repo access but **not package access** | Org owner: package → *Package settings* → *Manage access* → add user (Read) |
 | One pod still `ImagePullBackOff` after fixing access | backoff timer, can exceed 5 min | `kubectl -n $NS delete pod <name>` to force a retry |
 | `init` dies partway | DNS or cert not ready — init uploads over HTTPS | Finish Steps 1–2 first, then `kubectl delete namespace $NS` and redo |
-| Site is unstyled | theme cache lag | wait 60s; if still broken, `tutor k8s do settheme indigo` |
+| Site is unstyled | theme cache lag | wait 60s; if still broken, `tutor22 k8s do settheme indigo` |
+| `init` sits on the MinIO step forever | `minio/mc` image is gone from Docker Hub | stop it; `tutor22 k8s do init --limit=<service>` for the others (Step 6.5) |
 | Studio login: *Mismatching redirect URI* | only happens on a **restored** database | fresh installs register their own callback; append (never replace) `redirect_uris` |
 | Course imported but not in `/courses` | wrong index reindexed | `reindex_course --setup` (not `reindex_studio`) |
 | `curl \| grep` can't find a course on `/courses` | that page is **JavaScript-rendered** | check in a browser — grep proves nothing here |
-| `tutor k8s reindex-courses` → not found | that command doesn't exist | use `./manage.py cms reindex_course` |
+| `tutor22 k8s reindex-courses` → not found | that command doesn't exist | use `./manage.py cms reindex_course` |
 | `reindex_course --all` → `EOFError` | it wants a keyboard | use `--setup` |
 | Pods `Pending` | VPS is out of memory | free memory; **stop**, don't force it |
-| Everything mysteriously changed on the *other* instance | `TUTOR_ROOT` was unset | always export it; verify with `tutor config printvalue LMS_HOST` |
+| Everything mysteriously changed on the *other* instance | `TUTOR_ROOT` was unset | always export it; verify with `tutor22 config printvalue LMS_HOST` |
+| Search crash-loops, databases downgraded after a command | plain `tutor` (Tutor 21) was run | never install or run it on the servers; only `tutor22` |
 
 ---
 
@@ -587,9 +626,7 @@ Note: a queue length that only goes **up** means no worker is consuming jobs.
 
 ```bash
 kubectl delete namespace $NS          # deletes pods AND all data. No undo.
-rm -rf $TUTOR_ROOT
-rm ~/.local/share/tutor-plugins/host_proxy_nodeport_$INSTANCE.py
-rm ~/.local/share/tutor-plugins/sqa_stripe_$INSTANCE.py
+rm -rf $TUTOR_ROOT $TUTOR_PLUGINS_ROOT
 # then remove the Caddy block, validate, reload
 sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ```
@@ -601,10 +638,12 @@ and roots.
 
 ## What this deliberately doesn't do
 
-- **No image rebuild.** Branding baked into the MFEs (logos inside the images) is a rebuild,
-  ~73 min, and out of scope here.
-- **No CI/CD.** The pipeline knows about production and staging only. A new instance is updated
-  by hand, and drifts from day one.
+- **No image rebuild.** Branding baked into the MFEs (logos inside the images) is a rebuild
+  through `openedx-deploy`, and out of scope here. A per-site look that needs no rebuild is a
+  brand profile (`INDIGO_BRAND_PROFILE`), as the demo uses — see runbook **10**.
+- **No CI/CD.** The pipeline deploys staging and production only. k-12, the demo and any new
+  instance are updated by hand (switch the image tags, re-save the config, `k8s start`), and
+  drift from day one if nobody does.
 - **No backups.** Set them up separately if the instance holds anything you care about.
 - **Nothing is copied from production** — no users, no courses, no secrets. Import courses as
   `.tar.gz` files if you want content. Courses travel; people don't.

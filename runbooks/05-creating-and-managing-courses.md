@@ -268,9 +268,22 @@ def check_reply(expect, ans):
 ```bash
 # dev:
 tutor dev exec cms ./manage.py cms import /openedx/data /openedx/data/<course-dir>
-# k8s:
-tutor k8s exec cms -- ./manage.py cms import ../data <course-dir>
+# server (namespace from runbook 12):
+kubectl -n <namespace> exec deploy/cms -- ./manage.py cms import ../data <course-dir>
+# export a course to a .tar.gz (also the cheapest backup before editing one):
+kubectl -n <namespace> exec deploy/cms -- ./manage.py cms export_olx <course-key> --output /tmp/c.tar.gz
 ```
+
+> 🚨 **On VPS 1 (production + demo) script edits must stay light.** A Studio shell that loops
+> over courses calling `store.publish()` makes every publish rebuild course data and search
+> indexes in the workers; two such runs at once froze the whole box on 2026-10-22. Use one
+> shell, save with `store.update_item()` only where that is enough (static tabs, about pages
+> and the course itself are live on save), and check `free -h` first.
+
+> 🚨 **Dark mode and course HTML:** don't hard-code a pale `background:` without a text colour,
+> and don't hard-code text colours either: the theme sets heading and paragraph colours with
+> `!important` in dark mode, so the text turns white on your pale box. Use a translucent tint
+> (`background: rgba(<accent>, 0.12)`) and let the text inherit.
 
 `manage.py cms import <data_dir> <course_dir>` — first arg is the data root, second the extracted
 course folder. 🚨 The CLI import tends to create a **new run** rather than overwrite; for a clean

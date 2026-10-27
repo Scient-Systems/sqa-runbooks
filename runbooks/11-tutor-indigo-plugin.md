@@ -1,9 +1,9 @@
 # 11 — The Tutor Indigo plugin
 
 `tutor-indigo` is the Tutor plugin that does our theming and MFE-component injection. It's worth its
-own runbook because (a) it's a *forked* plugin installed differently from our loose `tutor-plugins/`
-files, and (b) it quietly renames your Docker image tags. This explains what it is, how it's
-installed locally vs on the VPS, what knobs it exposes, and how changes reach production.
+own runbook because (a) it's a *forked* plugin installed differently from our loose plugin files,
+and (b) one checkout of it is shared by every site on a server. This explains what it is, how it's
+installed locally vs on the servers, what knobs it exposes, and how changes reach production.
 
 For the design content it delivers, see runbook 10. For component injection, runbook 09.
 
@@ -19,43 +19,50 @@ plugin (`tutormfe.hooks` + `tutor.hooks`) that ships:
 - Tutor **config defaults** (`INDIGO_PRIMARY_COLOR`, `INDIGO_WELCOME_MESSAGE`, etc.);
 - an init task that selects the theme automatically.
 
-We run a **fork** (`Scient-Systems/tutor-indigo`, branch `release`) carrying the Meridian design and
-our custom widgets (SqaDashboardHero, SqaMembershipInstrument, SqaDashboardEmptyState, SqaTokenCard,
-MembershipLink wiring).
+We run a **fork** (`Scient-Systems/tutor-indigo`, branch **`verawood/indigo`**, ported onto
+upstream v22) carrying the Meridian design and our custom widgets: the catalog homepage and course
+about page (SqaCatalog, SqaCourseAboutEnroll), the header menu (SqaHeaderNav), the dashboard
+(SqaDashboardHero, SqaMembershipInstrument, SqaDashboardEmptyState, SqaPlanRedirect), the
+course-complete page (SqaCourseComplete), the Exit course link (SqaExitCourse), and SqaTokenCard.
+It also has per-site settings (brand profile, footer links, membership, AI tokens) so several sites
+share the same images. The old `release` branch is the retired Ulmo line.
 
-## 2. 🚨 It renames your image tags
+## 2. Image names
 
-When indigo is enabled it appends `-indigo` to the image names:
-- `DOCKER_IMAGE_OPENEDX` → `…/openedx-indigo`
-- `MFE_DOCKER_IMAGE` → `…/openedx-mfe-indigo`
-
-So our production tags are `ghcr.io/scient-systems/openedx-indigo` and
-`ghcr.io/scient-systems/openedx-mfe:21.0.0-indigo`. Always read the *effective* value before
-build/push:
+Upstream indigo appends `-indigo` to the *default* image names. Our servers never see that: every
+site's config sets both names explicitly to the CI-built images,
+`ghcr.io/scient-systems/openedx:<tag>` and `ghcr.io/scient-systems/openedx-mfe:<tag>`. Read the
+effective value with:
 ```bash
-tutor config printvalue DOCKER_IMAGE_OPENEDX
-tutor config printvalue MFE_DOCKER_IMAGE
+tutor22 config printvalue DOCKER_IMAGE_OPENEDX
+tutor22 config printvalue MFE_DOCKER_IMAGE
 ```
 
-## 3. How it's installed (local vs VPS — they differ!)
+## 3. How it's installed (local vs servers — they differ!)
 
-| | Local (WSL) | VPS (production) |
+| | Local (WSL) | Servers (both VPSes) |
 |---|---|---|
-| Source | pip-installed `tutor-indigo 21.1.3` (NOT the fork) | the fork at `/home/edx/tutor-indigo` |
-| Install method | `pip install tutor-indigo` (came with `tutor[full]`) | `pipx inject tutor /home/edx/tutor-indigo --editable` |
-| Pick up changes | n/a — local can't see the fork | `git pull` + `tutor config save` (editable → no reinstall) |
+| Source | upstream `tutor-indigo` (came with `tutor[full]`), unless you install your clone | the fork at `~/tutor-indigo-verawood` |
+| Install method | `pip install tutor[full]==22.0.2`; optionally `pip install -e ~/tutor-indigo` | installed **editable** into the `tutor22` pipx venv |
+| Pick up changes | `tutor config save` (only sees the fork if installed editable) | `git checkout <commit>` in the checkout + `tutor22 config save` |
 
-🚨 The consequence (the single most important fact about indigo on this project): **a local
-`tutor config save` does NOT reflect or validate fork changes** — it runs the pip 21.1.3 copy. Theme
-and slot-widget changes can only be truly validated on the VPS. Before pushing a fork change, mentally
-verify the wiring (runbook 09 §7) instead of relying on a local build.
+🚨 **One checkout per box, shared by every site on it** (production + demo on VPS 1, staging +
+k-12 on VPS 2). Moving it changes what the *next* `config save` of any site on that box renders.
+The deploy script moves it to the commit pinned in `versions.yml`; if you move it by hand, the
+neighbour picks it up on its next save. Fetch by URL, because the clone's `origin` may be a local
+path: `git -C ~/tutor-indigo-verawood fetch https://github.com/Scient-Systems/tutor-indigo.git verawood/indigo`.
 
-To set the VPS up the same way on a fresh machine:
+🚨 Without the fork installed locally, **a local `tutor config save` does NOT reflect fork changes**.
+Install your clone editable, or validate on staging. Before pushing a fork change, verify the wiring
+(runbook 09 §7) instead of relying on a local build.
+
+To set up a fresh server the same way:
 ```bash
-git clone https://github.com/Scient-Systems/tutor-indigo.git /home/edx/tutor-indigo
-pipx inject tutor /home/edx/tutor-indigo --editable
-tutor plugins enable indigo
-tutor config save
+pipx install --suffix 22 "tutor==22.0.2"                 # installs the CLI as tutor22
+pipx inject tutor22 tutor-mfe==22.1.0 tutor-minio==22.0.0 tutor-contrib-codejail==22.0.1   # versions: openedx-deploy versions.yml
+git clone -b verawood/indigo https://github.com/Scient-Systems/tutor-indigo.git ~/tutor-indigo-verawood
+pipx inject tutor22 --editable ~/tutor-indigo-verawood
+TUTOR_ROOT=… TUTOR_PLUGINS_ROOT=… tutor22 plugins enable indigo
 ```
 
 ## 4. The knobs (config defaults in `plugin.py`)
@@ -64,16 +71,25 @@ tutor config save
 "WELCOME_MESSAGE": "Where curious minds become builders",   # the index-hero <h1>
 "PRIMARY_COLOR": "#101A33",                                  # Meridian ink (deep navy)
 "ENABLE_DARK_TOGGLE": True,
-"FOOTER_NAV_LINKS": [ {"title": "About Us", "url": "/about"}, ... ],
+"FOOTER_NAV_LINKS": [ {"title": "Terms of Service", "url": "/tos"},
+                      {"title": "Privacy Policy", "url": "/privacy"} ],
+"BRAND_PROFILE": "",          # "scient" on the demo: second palette + logos
+"SHOW_MEMBERSHIP": True,      # False on k-12 and the demo
+"SHOW_AI_TOKENS": True,       # False on the demo
 ```
-Override per-environment:
+Override per-environment (on a server, with that site's `TUTOR_ROOT`/`TUTOR_PLUGINS_ROOT` set):
 ```bash
-tutor config save --set INDIGO_WELCOME_MESSAGE="..."
-tutor config save --set INDIGO_PRIMARY_COLOR="#101A33"
-tutor config save --set INDIGO_FOOTER_NAV_LINKS='[]'   # remove all footer links
+tutor22 config save --set INDIGO_WELCOME_MESSAGE="..."
+tutor22 config save --set INDIGO_FOOTER_NAV_LINKS='[]'     # remove all footer links
+tutor22 config save --set INDIGO_SHOW_MEMBERSHIP=false     # hide membership
+tutor22 k8s start                                          # apply
 ```
-🚨 A `config.yml` override beats the plugin default — check `tutor config printvalue INDIGO_…` to see
-what's actually in effect (defaults silently lose).
+🚨 A `config.yml` override beats the plugin default — check `tutor22 config printvalue INDIGO_…` to
+see what's actually in effect (defaults silently lose). The per-site values each site uses are in
+runbook **10** §1.
+
+The policy pages behind the default footer links are `templates/indigo/lms/templates/static_templates/tos.html`
+and `privacy.html`.
 
 ## 5. What lives in the fork (file map)
 
@@ -91,23 +107,27 @@ tutorindigo/
     └── tasks/init.sh         ← auto-selects the theme on `tutor … do init`
 ```
 
-🚨 New files anywhere under `tutorindigo/` must be `git add`-ed — the VPS builds from the committed
+🚨 New files anywhere under `tutorindigo/` must be `git add`-ed — CI builds from the committed
 tree; an untracked partial once broke an openedx image build.
+
+`tutor-indigo` has its own tests on `verawood/indigo` (`.github/workflows/test.yml`). Its
+`notify-deploy` job would open the pin PR in `openedx-deploy`, but it skips today because the repo
+has no `DEPLOY_DISPATCH_TOKEN` secret — so you change its pin by hand (runbook 17).
 
 ## 6. Deploying an indigo change
 
-Which pipeline depends on *what* you changed (this is the runbook-10 §4 table, restated):
+Every kind of change goes through the pipeline (runbook **17**): push to `verawood/indigo`, set the
+`tutor-indigo` ref in `openedx-deploy` `versions.yml`, merge to `main`. CI builds both images and
+the deploy moves the servers' shared checkout to that commit.
 
-- **Legacy theme (templates/sass)** → openedx image: `git pull` → `tutor config save` →
-  `tutor images build openedx` → push → `rollout restart deployment/lms deployment/cms`.
-- **MFE component / `plugin.py` slot / brand npm line** → mfe image: `git pull` → `tutor config save`
-  → `tutor images build mfe` → push → `rollout restart deployment/mfe`.
-- **Config default only** (e.g. WELCOME_MESSAGE) → it's rendered into templates, so it still needs the
-  openedx image rebuild to change legacy pages; for MFE config it needs `tutor config save` + mfe
-  rebuild.
+What each kind of change actually needs, for when you are judging how risky it is:
 
-Because indigo is an **editable** install on the VPS, the only "install" step is `git pull` — no
-`pip install`/`pipx` re-run needed.
+- **Legacy theme (templates/sass)** → inside the openedx image.
+- **MFE component / `plugin.py` slot / brand npm line** → inside the mfe image.
+- **`BRAND_DIST_REF` or a runtime setting in `plugin.py`** → only a `config save` + `k8s start`, no
+  image (runbook 10 §4 has the shortcut and its caveat).
+- **A per-site setting** (`INDIGO_*` in one site's config) → `tutor22 config save --set …` on that
+  site only; no commit, no build.
 
 ---
 

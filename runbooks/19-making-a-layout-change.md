@@ -14,10 +14,12 @@ read the hostname → try it in DevTools → edit ONE repo → push → merge th
    → check staging → click Deploy production
 ```
 
-- **About 2 hours.** ~75 min of that is the build. The edit itself takes minutes.
+- **Under an hour, usually.** The build is ~7 min with a warm cache (up to ~1 hour cold). The
+  edit itself takes minutes.
 - **The hostname tells you which repo to edit.** Nothing else does.
 - **You cannot preview locally.** Use DevTools, then staging.
-- **Every change costs a full ~75 min build**, even one line of CSS. So **batch your tweaks**.
+- **Every change is a full build of both images**, even one line of CSS. Batch your tweaks.
+- **Brand CSS alone can skip the build** for staging: see Step 3.2's note on `BRAND_DIST_REF`.
 
 Note: editing the wrong repo is the number one time waster. It does not error. The build goes
 green, the deploy works, the page just does not change. Do Step 0 first.
@@ -27,8 +29,9 @@ green, the deploy works, the page just does not change. Do Step 0 first.
 ## Prerequisites
 
 1. **Ensure you can open the site in a browser** and open DevTools (F12).
-2. **Ensure you have both theme repos cloned**, on the right branch: `tutor-indigo` on `release`,
-   `brand-openedx` on `ulmo/indigo`.
+2. **Ensure you have both theme repos cloned**, on the right branch: `tutor-indigo` on
+   `verawood/indigo`, `brand-openedx` on `verawood/indigo`. (`release` and `ulmo/indigo` are the
+   retired Ulmo line: a push there reaches no site.)
 3. **Ensure you can push** to the `Scient-Systems` org.
 4. **Ensure you can merge PRs in `openedx-deploy`.** That is where the deploy happens.
 5. **Ensure you have Node 18+ and npm.** Only needed for `brand-openedx`.
@@ -49,16 +52,23 @@ Note: read the real hostname. Not the page title, not the design mock.
 | Address bar | Surface | Repo to edit | Go to |
 |---|---|---|---|
 | `lms.stemquestacademy.com/…` | Legacy LMS page | `tutor-indigo` | **Step 2** |
-| `apps.stemquestacademy.com/…` | MFE page | `brand-openedx` or `tutor-indigo` | **Step 3** |
-| `apps.stemquestacademy.com/sqa-payment/…` | Payment MFE | `frontend-app-sqa-payment` | **Step 4** |
+| `apps.lms.stemquestacademy.com/…` | MFE page | `brand-openedx` or `tutor-indigo` | **Step 3** |
+| `apps.lms.stemquestacademy.com/sqa-payment/…` | Payment MFE | `frontend-app-sqa-payment` | **Step 4** |
 | `studio.stemquestacademy.com/…` | Studio | none, it is unthemed on purpose | **stop, ask first** |
 | `stemquestacademy.com` (no subdomain) | Marketing site | `sqa-homepage` | runbook 13 |
+
+Note: the same pattern holds on the other sites: `staging.` / `apps.staging.`,
+`k-12.` / `apps.k-12.`, `training-demo.` / `apps.training-demo.`.
 
 Note: `lms.` pages are our own HTML and CSS. `apps.` pages are stock React apps we do not own.
 Different code, different steps.
 
-Note: if the page redirects, use where it **lands**. `lms.…/dashboard` sends you to
-`apps.…/learner-dashboard`. That is an MFE page, so Step 3.
+Note: if the page redirects, use where it **lands**. On Verawood most learner pages are MFEs:
+`lms.…/` (home), `lms.…/courses` and every course **about** page redirect to the **Catalog
+MFE** at `apps.lms.…/catalog/`, and `lms.…/dashboard` lands on `apps.lms.…/learner-dashboard/`.
+Those are all Step 3. The legacy LMS pages left are certificates, the policy pages (`/tos`,
+`/privacy`), the instructor dashboard, and the problems inside a course unit (they render in an
+iframe served by the LMS).
 
 ### Step 0.3 - Set variables and pull
 
@@ -67,19 +77,20 @@ export INDIGO=$HOME/tutor-indigo
 export BRAND=$HOME/brand-openedx
 export PAY=$HOME/frontend-app-sqa-payment
 
-git -C $INDIGO checkout release     && git -C $INDIGO pull
-git -C $BRAND  checkout ulmo/indigo && git -C $BRAND  pull
-git -C $PAY    checkout main        && git -C $PAY    pull
+git -C $INDIGO checkout verawood/indigo && git -C $INDIGO pull
+git -C $BRAND  checkout verawood/indigo && git -C $BRAND  pull
+git -C $PAY    checkout main            && git -C $PAY    pull
 ```
 
-Note: `brand-openedx` is not on `master`. It is on `ulmo/indigo`. Wrong branch means nothing ships.
+Note: neither theme repo is on its GitHub default branch (`release` / `master`). Both are on
+`verawood/indigo`. Wrong branch means nothing ships.
 
 ---
 
 ## Step 1 — Try it in DevTools first
 
 Note: do this on every path. It is your only fast feedback. After this, the next time you see your
-change is on staging, about 75 minutes later.
+change is on staging, after a build.
 
 ### Step 1.1 - Inspect the element
 
@@ -114,16 +125,17 @@ Paths are under `$INDIGO/tutorindigo/templates/indigo/lms/static/sass/`.
 
 | Page | File |
 |---|---|
-| Home page | `home/_home.scss` |
 | Header | `extra/_header.scss` |
 | Footer | `extra/_footer.scss` |
-| Dashboard | `dashboard/_dashboard.scss` |
-| Course catalog (`/courses`) | `courseware/_discover.scss` |
-| Course about page | `courseware/_about.scss` |
 | Certificates | `certificates/_certificate.scss` |
+| Problems and other blocks inside a unit | `xblock/_xblock.scss` |
 | Wiki / Teams | `views/_wiki.scss` / `views/_teams.scss` |
 | Colours, fonts, dark-mode variables | `partials/lms/theme/_variables.scss` |
-| Anything else | `partials/lms/theme/_extras.scss` |
+| Anything else (policy pages, instructor dashboard) | `partials/lms/theme/_extras.scss` |
+
+Note: `home/_home.scss`, `dashboard/_dashboard.scss`, `courseware/_discover.scss` and
+`courseware/_about.scss` still exist but style pages learners no longer reach: those URLs
+redirect to MFEs (Step 0.2). Editing them changes nothing anyone sees.
 
 ### Step 2.2 - Made a new file? Import it
 
@@ -183,9 +195,9 @@ broken a build before.
 
 ## Step 3 — Path B: an MFE page (`apps.…`)
 
-Note: you cannot edit these pages. `learning`, `learner-dashboard`, `profile`, `account`,
-`discussions` and `authn` are stock Open edX apps and we do not fork them. You change them from
-outside, in one of two ways.
+Note: you cannot edit these pages. `catalog` (home, course list, course about), `learning`,
+`learner-dashboard`, `profile`, `account`, `discussions` and `authn` are stock Open edX apps
+and we do not fork them. You change them from outside, in one of two ways.
 
 ### Step 3.1 - Pick which one
 
@@ -203,7 +215,10 @@ Paths are under `$BRAND/paragon/`.
 | Page | File |
 |---|---|
 | Learner dashboard | `_dashboard.scss` |
+| Catalog (home, course list, course about) | `_catalog.scss` |
 | Courseware | `_learning.scss` |
+| Course-complete page | `_course-exit.scss` |
+| Phone-width fixes | `_phone.scss` |
 | Profile | `_profile.scss` |
 | Account settings | `_account.scss` |
 | Discussions | `_discussion.scss` |
@@ -223,13 +238,19 @@ Now rebuild the CSS. This is not optional:
 cd $BRAND
 npm ci
 make build
-git add -A paragon dist
+git add -A paragon dist dist-scient
 git status --short          # dist/*.css MUST show up here
 git commit -m "layout: <page> — <what changed>"
 ```
 
 Note: `dist/` is committed on purpose. Browsers load that compiled file from a CDN. No `dist/`
-means users see nothing.
+means users see nothing. `dist-scient/` is the demo's palette, regenerated by the same build.
+
+Note: the CSS browsers load is pinned by **`BRAND_DIST_REF`** in `tutor-indigo`'s
+`tutorindigo/plugin.py`, not by the image. After pushing the brand commit you must set that
+line to its SHA too (Step 5.4). A brand-only change can reach staging without a build: bump
+`BRAND_DIST_REF`, move staging's theme checkout to that commit and re-save its config. The
+pipeline does this for you when you go through `versions.yml`.
 
 Note: never use `@media (--pgn-size-breakpoint-min-width-md)` or any other `--pgn-` media query in
 a new rule. Browsers drop those blocks in production and your rule quietly dies. Use pixels:
@@ -290,11 +311,16 @@ Slots we already use. Reuse one if it fits:
 | learner-dashboard | `org.openedx.frontend.learner_dashboard.widget_sidebar.v1` | right sidebar card |
 | learner-dashboard | `org.openedx.frontend.learner_dashboard.no_courses_view.v1` | the empty state |
 | profile | `org.openedx.frontend.profile.additional_profile_fields.v1` | left side of the profile form |
+| learning | `learning_help_slot` | course header, right side (Exit course, theme toggle) |
+| learning | `org.openedx.frontend.learning.course_exit_view_courses.v1` | the course-complete page |
+| catalog | `org.openedx.frontend.catalog.home_page.*` / `course_catalog_page.*` / `course_about_page.*` | homepage, course list, about page |
 | (all) | `org.openedx.frontend.layout.header_desktop_main_menu.v1` | desktop top nav |
 | (all) | `org.openedx.frontend.layout.footer.v1` | footer. **avoid**, it has dedupe logic |
 
-Note: need a different slot? Get the ID from `github.com/openedx/frontend-app-<name>`, branch
-`release/ulmo.3`, in `src/plugin-slots/*/index.jsx`. Do not guess. A wrong ID renders nothing.
+Note: need a different slot? Get the ID from `github.com/openedx/frontend-app-<name>`, on the
+Verawood release branch (`release/verawood.*`), in `src/plugin-slots/*/index.jsx`. Do not
+guess. A wrong ID renders nothing. The catalog slots are all listed in `tutor-indigo`'s
+`plugin.py`.
 
 Four rules for the `.jsx`. All four have bitten us:
 
@@ -355,38 +381,44 @@ Note: pushing does not deploy. Merging the **pin PR** starts the build.
 ### Step 5.1 - Push to the right branch
 
 ```bash
-git -C $INDIGO push origin release        # tutor-indigo
-git -C $BRAND  push origin ulmo/indigo    # brand-openedx
-git -C $PAY    push origin main           # frontend-app-sqa-payment
+git -C $INDIGO push origin verawood/indigo   # tutor-indigo
+git -C $BRAND  push origin verawood/indigo   # brand-openedx
+git -C $PAY    push origin main              # frontend-app-sqa-payment
 ```
 
 ### Step 5.2 - Wait for that repo's tests to go green
 
 Note: red means stop. Nothing happens next until it is green.
 
-### Step 5.3 - Merge the pin PR in `openedx-deploy`
+### Step 5.3 - Change the pin in `openedx-deploy` and merge it to `main`
 
-A PR opens on its own, in `openedx-deploy`. Not in the repo you pushed to. It looks like:
+The pin is one line in `versions.yml`: the `ref:` of the repo you changed. Merging that change
+into `openedx-deploy` `main` is what says "build and ship this".
 
+For **these three repos nobody opens the PR for you** (only `sqa_django_app` does it on its
+own). Open it yourself:
+
+```bash
+cd ~/openedx-deploy && git checkout main && git pull
+# edit versions.yml: set the ref under your repo to the commit you pushed
+git checkout -b pin/<repo>-<short-sha> && git commit -am "Pin <repo> <short-sha>: <what changed>"
+git push -u origin HEAD && gh pr create --base main --fill
 ```
-pin: tutor-indigo 058e4f836a31 -> 9c1d40ab77e2
-```
 
-It changes one line in `versions.yml`. Merging it is what says "build and ship this".
+### Step 5.4 - If you edited `brand-openedx`, change THREE things
 
-### Step 5.4 - If you edited `brand-openedx`, merge TWO PRs
-
-| PR opens in | What it changes |
+| Where | What it changes |
 |---|---|
-| `openedx-deploy` | the `brand-openedx` pin |
-| `tutor-indigo` | `BRAND_DIST_REF`, the CDN commit browsers actually load |
+| `tutor-indigo` `tutorindigo/plugin.py` | `BRAND_DIST_REF` = your brand commit. The CDN commit browsers actually load |
+| `openedx-deploy` `versions.yml` | the `brand-openedx` ref = your brand commit |
+| `openedx-deploy` `versions.yml` | the `tutor-indigo` ref = the commit that changed `BRAND_DIST_REF` |
 
-Note: merge both. Merging only the first ships the **old** CSS.
+Note: all three. Skipping the first ships the **old** CSS, and nothing in the pipeline tells
+you: the build passes and staging deploys.
 
-Note: merging the `tutor-indigo` one opens a third pin PR in `openedx-deploy`. Merge that too.
-
-Note: if you skip it, staging fails its health check with `BRAND PIN DRIFT`. That check exists
-because this used to go unnoticed. If you see that message, this step is why.
+Note: check the CDN has your commit first:
+`curl -sI https://cdn.jsdelivr.net/gh/Scient-Systems/brand-openedx@<sha>/dist/core.min.css`
+must return `200`.
 
 ---
 
@@ -396,15 +428,16 @@ because this used to go unnoticed. If you see that message, this step is why.
 
 `openedx-deploy` → **Actions**.
 
-Note: about **75 minutes**. Every change rebuilds both images, even one line of CSS. Do not cancel
-it.
+Note: about **7 minutes** with a warm cache, up to ~1 hour cold. Every change rebuilds both
+images, even one line of CSS. Do not cancel it.
 
 Note: the build opens the finished image and checks our code is really inside it. If not, it fails
-and ships nothing. That is correct behaviour, not a flake.
+and ships nothing. That is correct behaviour, not a flake. An MFE build failing on `npm`
+`ECONNRESET` *is* a flake (the npm registry cut a download): re-run the failed job.
 
 ### Step 6.2 - Staging deploys itself
 
-Note: this is automatic, then it runs an 11-point health check. You do nothing.
+Note: this is automatic, then it runs the smoke check (`scripts/smoke.sh`). You do nothing.
 
 ### Step 6.3 - Look at your page on staging
 
@@ -435,7 +468,7 @@ Note: staging is automatic. Production is a button you press.
 ### Step 7.1 - Get the tag
 
 Note: it is whatever staging is running. It is printed in the build summary and the staging deploy
-summary. It is 12 characters, like `b4e989eac176`.
+summary. It is 12 characters, like `7bde8ac98ba1`.
 
 ### Step 7.2 - Run the workflow
 
@@ -450,7 +483,10 @@ Three things happen on their own first:
 - **It checks staging is already on that tag** and refuses if not.
 - **It backs up the database and uploaded files** and copies them off the server. Missing backup
   means it stops before touching anything.
-- **It runs the same 11-point health check** after.
+- **It runs the same smoke check** after.
+
+Note: k-12 and the demo are **not** deployed by this. They are rolled forward by hand when
+someone decides to; see runbook **17** §4b.
 
 ---
 
@@ -458,7 +494,7 @@ Three things happen on their own first:
 
 ```bash
 curl -s -o /dev/null -w 'lms %{http_code}\n' https://lms.stemquestacademy.com/heartbeat
-curl -s -o /dev/null -w 'mfe %{http_code}\n' https://apps.stemquestacademy.com/
+curl -s -o /dev/null -w 'mfe %{http_code}\n' https://apps.lms.stemquestacademy.com/catalog/
 ```
 
 Then open the real page, hard-refresh, and check the same four boxes as Step 6.3.
@@ -484,10 +520,10 @@ Note: roll back first. Investigate after.
 |---|---|---|
 | Deployed, page looks exactly the same | wrong repo for that hostname | redo Step 0 |
 | New SCSS file does nothing, no error | never imported | Step 2.2 or Step 3.2 |
-| Staging health check says `BRAND PIN DRIFT` | did not merge the `tutor-indigo` PR | Step 5.4 |
+| Brand CSS change never appears, everything green | `BRAND_DIST_REF` not bumped | Step 5.4 |
 | MFE CSS change shows up only sometimes | CDN cache, up to 5 min | wait, then Ctrl-Shift-R |
 | Widget missing, console says `ReferenceError: MyWidget is not defined` | missing the definitions line | Step 3.3, file 2 |
-| Widget missing, no console error at all | wrong slot ID | check it against `release/ulmo.3` |
+| Widget missing, no console error at all | wrong slot ID | check it against the Verawood release branch |
 | Build fails: `Template syntax error: Expected an expression` | a `{{` in your `.jsx`, often `style={{…}}` | move styles to a `const` |
 | Build fails on a file you never touched | your `.jsx` broke the shared config | fix yours, the error names the wrong file |
 | Build fails right after you added a file | never `git add`-ed | `git add -A`, push again |
@@ -495,7 +531,9 @@ Note: roll back first. Investigate after.
 | Text unreadable in dark mode only | no `body.indigo-dark-theme` rule | Step 2.4 |
 | Payment MFE ignores your CSS | inline styles always win | edit the component |
 | CI says *"job was not acquired by Runner"* | GitHub is broken, not you | check githubstatus.com, re-run |
-| One line of CSS took 75 minutes | known, any pin change rebuilds both images | batch your tweaks |
+| A build took close to an hour | cold cache: any pin change rebuilds both images | normal; warm builds are ~7 min |
+| MFE build fails with `npm` `ECONNRESET` | npm registry cut a download | re-run the failed job |
+| You pushed and nothing at all happened | pushed to `release` / `ulmo/indigo` (the old Ulmo line) | push to `verawood/indigo` |
 
 ---
 

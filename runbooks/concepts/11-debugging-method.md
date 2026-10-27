@@ -25,12 +25,13 @@ Two disciplines make it work:
 **Code/theme deploy chain** — for "I deployed X but production shows old X":
 
 ```
-1 repo        git log — is the change committed & pushed, right branch?
-2 VPS clone   git -C /home/edx/<repo> log — pulled?
-3 render      grep -r "<change>" $(tutor config printroot)/env/   (→ C06)
-4 image       docker run --rm <image> grep …  — baked in? (layer cache! → C05)
-5 registry    pushed? tag moved?
-6 cluster     new ConfigMap/pod spec? (tutor k8s start ran?)      (→ C07)
+1 repo        git log — is the change committed & pushed, right branch (verawood/indigo, main)?
+2 pin         is that commit the ref in openedx-deploy versions.yml on main?
+3 build       did CI build that tag? (build summary; the tag = hash of versions.yml) (→ C05)
+4 render      grep -r "<change>" $TUTOR_ROOT/env/ on the box — and the shared
+              ~/tutor-indigo-verawood checkout at the pinned commit?   (→ C06)
+5 deploy      does the pod run that tag? kubectl get deploy lms -o jsonpath=…image
+6 cluster     new ConfigMap/pod spec? (tutor22 k8s start ran?)    (→ C07)
 7 pod         rollout status — did it CONVERGE? (stuck rollout = the great liar)
 8 process     kubectl exec … grep — the running container has it?
 9 delivery    curl the URL — right content, right Content-Type?
